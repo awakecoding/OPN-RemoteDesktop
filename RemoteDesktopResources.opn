@@ -1,0 +1,15 @@
+// OPN RemoteDesktop strings library
+module RemoteDesktopResources;
+
+// RDPBCGR.opn
+string RDPBCGR_RDPEGDI_GLYPHINDEX_STR = "RDPBCGR: The {0} field in type GLYPHINDEX_ORDER must be set to zero, not {1}, if the fOpRedundant flag is set.";
+string RDPBCGR_ORDER_DECODE_ERROR_STR = "RDPBCGR: The OrderData field in type {0} is not decoded successfully due to invalid data.";
+string RDPBCGR_DECRYPTION_ERROR = "RDPBCGR: Parsing failed due to TLS decryption error.";
+string RDPBCGR_TCP_SEGMENT_LOST = "RDPBCGR: Parsing failed due to TCP segment lost.";
+
+// RDPEDISP.opn
+string RDPEDISP_DISPLAY_MONITOR_LAYOUT_WIDTH_STR = "RDPEDISP: The Width field in type DISPLAYCONTROL_MONITOR_LAYOUT must not be an odd value.";
+
+// RDPEDYC.opn
+string RDPEDYC_MISSING_CLOSE_MESSAGE = "RDPEDYC: Missing DVCClose message for ChannelID {0}.";
+string RDPEDYC_DATA_PDU_SP_WINDOWS_BEHAVIOUR = "Windows implementations do not initialize this field. As a result, its value is random.";

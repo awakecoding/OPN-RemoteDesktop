@@ -1,0 +1,1166 @@
+protocol RDPEGFX with
+BinaryEncodingDefaults{Endian = Endian.Little},
+Documentation
+{
+    ProtocolName = "Remote Desktop Protocol: Graphics Pipeline Extension",
+    DocumentName = "MS-RDPEGFX",
+    ShortName = "RDPEGFX",
+    Description = ""
+},
+OPNAuthoring
+{
+    Copyright = "(c) Microsoft Corporation",
+    References = 
+        [
+            new Reference{Name = "MS-RDPEGFX", Version = "4.0", Date = "01/31/2013", ProgramName = ProgramName.MCPP},
+        ],
+    RevisionSummary =
+        [
+            new Revision{Class = RevisionClass.Major, Version = "363238", Date = "04/28/2014"}
+        ]
+};
+
+using Standard;
+using Utility;
+using RDPBCGR;
+using RDPEDYC;
+using RDPRFX;
+using RDPNSC;
+
+endpoint Server 
+    over RDPEDYC.Server | over SegmentDataServer
+    accepts RDPGFX_HEADER issues RDPGFX_HEADER
+{
+    observe this issues h:RDPGFX_HEADER
+        where h.cmdId == cmdIdEnum.RDPGFX_CMDID_WIRETOSURFACE_1 &&
+            (h as RDPGFX_WIRE_TO_SURFACE_PDU_1).codecId == RDPGFX_WIRE_TO_SURFACE_PDU_1_CodecId.RDPGFX_CODECID_CLEARCODEC
+    {
+        var m = h as RDPGFX_WIRE_TO_SURFACE_PDU_1;
+        var clearCodecData = m.bitmapData as CLEARCODEC_BITMAP_STREAM;
+        if ((clearCodecData.$"flags" & 0x02) == 0)
+        {
+            var compositePayload = clearCodecData.compositePayload as CLEARCODEC_COMPOSITE_PAYLOAD;
+            if (compositePayload.subcodecByteCount > 0)
+            {
+                var subcodecs = compositePayload.subcodecData as CLEARCODEC_SUBCODECS_DATA;
+                foreach (var subcodec in subcodecs.subcodecs)
+                {
+                    if (subcodec.subCodecId == 0x02)
+                    {
+                        var data = subcodec.bitmapData as CLEARCODEC_SUBCODEC_RLEX;
+                        var stopIndexBitCount = CalcBitNum((data.paletteCount - 1) as uint);
+                        foreach (var seg in data.segments)
+                        {
+                            byte byteValue = seg.suiteDepth;
+                            seg.suiteDepth = ((byteValue >> (stopIndexBitCount as int)) & 0xFF) as byte;     // most (8 - stopIndexBitCount) significant bits
+                            seg.stopIndex = (byteValue & (0xFF >> ((8 - stopIndexBitCount) as int))) as byte;      // least stopIndexBitCount significant bits
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+client endpoint Client connected to Server;
+
+endpoint SegmentDataServer
+    over RDPEDYC.Server
+    accepts RDP_SEGMENTED_DATA issues RDP_SEGMENTED_DATA;
+
+client endpoint SegmentDataClient connected to SegmentDataServer;
+
+autostart actor RDPEGFXOverRDPEDYC(RDPEDYC.Server edycServer)
+{
+    process edycServer accepts m:DVCDataPDU where m#EDYCChannelName != nothing && m#EDYCChannelName.ToString() == "Microsoft::Windows::RDS::Graphics"
+    {
+        if (m.Data[0] is descriptorEnum)
+        {
+            switch (m.Data)
+            {
+                case segment:RDP_SEGMENTED_DATA from BinaryDecoder =>
+                    dispatch endpoint SegmentDataServer over edycServer accepts segment;
+                default =>
+                    ThrowDecodingException("RDPEGFX", "RDP_SEGMENTED_DATA");
+            }
+        }
+        else
+        {
+            DecodeGraphicMessageAndDispatch(m.Data, AcceptsDispatcher);
+        }
+    }
+    process edycServer issues m:DVCDataPDU where m#EDYCChannelName != nothing && m#EDYCChannelName.ToString() == "Microsoft::Windows::RDS::Graphics"
+    {
+        if (m.Data[0] is descriptorEnum)
+        {
+            switch (m.Data)
+            {
+                case segment:RDP_SEGMENTED_DATA from BinaryDecoder =>
+                    dispatch endpoint SegmentDataServer over edycServer issues segment;
+                default =>
+                    ThrowDecodingException("RDPEGFX", "RDP_SEGMENTED_DATA");
+            }
+        }
+        else
+        {
+            DecodeGraphicMessageAndDispatch(m.Data, IssuesDispatcher);
+        }
+    }
+    
+    void AcceptsDispatcher(RDPGFX_HEADER m)
+    {
+        dispatch endpoint Server over edycServer accepts m;
+    }
+    
+    void IssuesDispatcher(RDPGFX_HEADER m)
+    {
+        dispatch endpoint Server over edycServer issues m;
+    }
+}
+
+autostart actor RDPEFGXOverSegmentDataServer(SegmentDataServer segServer)
+{
+    process segServer accepts segment:RDP_SEGMENTED_DATA where !segment.IsCompressed()
+    {
+        var server = endpoint Server over segServer;
+        binary payload;
+        if (segment.descriptor == descriptorEnum.SINGLE)
+        {
+            payload = (segment.bulkData as RDP8_BULK_ENCODED_DATA).data;
+        }
+        else
+        {
+            payload = AccumulateData(segment);
+        }
+        DecodeSegmentDataToGraphicMessages(payload, AcceptsDispatcher);
+    }
+    
+    process segServer issues segment:RDP_SEGMENTED_DATA where !segment.IsCompressed()
+    {
+        var server = endpoint Server over segServer;
+        binary payload;
+        if (segment.descriptor == descriptorEnum.SINGLE)
+        {
+            payload = (segment.bulkData as RDP8_BULK_ENCODED_DATA).data;
+        }
+        else
+        {
+            payload = AccumulateData(segment);
+        }
+        DecodeSegmentDataToGraphicMessages(payload, IssuesDispatcher);
+    }
+    
+    void DecodeSegmentDataToGraphicMessages(binary payload, void(RDPGFX_HEADER) dispatcher)
+    {
+        int offset = 0;
+        while (offset + 8 < payload.Count)
+        {
+            uint pduLength = ((payload[offset + 7] as uint) << 24) + ((payload[offset + 6] as uint) << 16) + 
+                ((payload[offset + 5] as uint) << 8) + (payload[offset + 4] as uint);
+            if (offset + pduLength <= payload.Count)
+            {
+                DecodeGraphicMessageAndDispatch(payload.Segment(offset, pduLength as int), dispatcher);
+                offset += (pduLength as int);
+            }
+            else
+            {
+                throw "RDPEGFX: Invalid pduLength of graphic message; may be caused by contiguous message missing.";
+            }
+        }
+    }
+    
+    // Accumulate binary data carried on MULTIPART RDP_SEGMENTED_DATA.
+    binary AccumulateData(RDP_SEGMENTED_DATA segments)
+    {
+        binary bin = $[];
+        var segArray = segments.segmentArray as array<RDP_DATA_SEGMENT>;
+        foreach (var seg in segArray)
+        {
+            if (!((seg.bulkData.header & CompressedSegmentHeader.PACKET_COMPRESSED) == CompressedSegmentHeader.PACKET_COMPRESSED))
+            {
+                bin += seg.bulkData.data;
+            }
+        }
+        return bin;
+    }
+    
+    void AcceptsDispatcher(RDPGFX_HEADER m)
+    {
+        dispatch endpoint Server over segServer accepts m;
+    }
+    
+    void IssuesDispatcher(RDPGFX_HEADER m)
+    {
+        dispatch endpoint Server over segServer issues m;
+    }
+}
+
+void DecodeGraphicMessageAndDispatch(stream s, void(RDPGFX_HEADER) dispatcher)
+{
+    ushort commandId = ((s.PeekByte(1 * 8) as ushort) << 8) + s.PeekByte(0) as ushort;  // Little endian
+    switch (commandId)
+    {
+        case cmdIdEnum.RDPGFX_CMDID_WIRETOSURFACE_1 => 
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_WIRE_TO_SURFACE_PDU_1>(s, dispatcher, "RDPGFX_WIRE_TO_SURFACE_PDU_1");
+        case cmdIdEnum.RDPGFX_CMDID_WIRETOSURFACE_2 =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_WIRE_TO_SURFACE_PDU_2>(s, dispatcher, "RDPGFX_WIRE_TO_SURFACE_PDU_2");
+        case cmdIdEnum.RDPGFX_CMDID_DELETEENCODINGCONTEXT =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_DELETE_ENCODING_CONTEXT_PDU>(s, dispatcher, "RDPGFX_DELETE_ENCODING_CONTEXT_PDU");
+        case cmdIdEnum.RDPGFX_CMDID_SOLIDFILL =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_SOLIDFILL_PDU>(s, dispatcher, "RDPGFX_SOLIDFILL_PDU");
+        case cmdIdEnum.RDPGFX_CMDID_SURFACETOSURFACE =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_SURFACE_TO_SURFACE_PDU>(s, dispatcher, "RDPGFX_SURFACE_TO_SURFACE_PDU");
+        case cmdIdEnum.RDPGFX_CMDID_SURFACETOCACHE =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_SURFACE_TO_CACHE_PDU>(s, dispatcher, "RDPGFX_SURFACE_TO_CACHE_PDU");
+        case cmdIdEnum.RDPGFX_CMDID_CACHETOSURFACE =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_CACHE_TO_SURFACE_PDU>(s, dispatcher, "RDPGFX_CACHE_TO_SURFACE_PDU");
+        case cmdIdEnum.RDPGFX_CMDID_EVICTCACHEENTRY =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_EVICT_CACHE_ENTRY_PDU>(s, dispatcher, "RDPGFX_EVICT_CACHE_ENTRY_PDU");
+        case cmdIdEnum.RDPGFX_CMDID_CREATESURFACE =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_CREATE_SURFACE_PDU>(s, dispatcher, "RDPGFX_CREATE_SURFACE_PDU");
+        case cmdIdEnum.RDPGFX_CMDID_DELETESURFACE =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_DELETE_SURFACE_PDU>(s, dispatcher, "RDPGFX_DELETE_SURFACE_PDU");
+        case cmdIdEnum.RDPGFX_CMDID_STARTFRAME =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_START_FRAME_PDU>(s, dispatcher, "RDPGFX_START_FRAME_PDU");
+        case cmdIdEnum.RDPGFX_CMDID_ENDFRAME =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_END_FRAME_PDU>(s, dispatcher, "RDPGFX_END_FRAME_PDU");
+        case cmdIdEnum.RDPGFX_CMDID_FRAMEACKNOWLEDGE =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_FRAME_ACKNOWLEDGE_PDU>(s, dispatcher, "RDPGFX_FRAME_ACKNOWLEDGE_PDU");
+        case cmdIdEnum.RDPGFX_CMDID_RESETGRAPHICS =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_RESET_GRAPHICS_PDU>(s, dispatcher, "RDPGFX_RESET_GRAPHICS_PDU");
+        case cmdIdEnum.RDPGFX_CMDID_MAPSURFACETOOUTPUT =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_MAP_SURFACE_TO_OUTPUT_PDU>(s, dispatcher, "RDPGFX_MAP_SURFACE_TO_OUTPUT_PDU");
+        case cmdIdEnum.RDPGFX_CMDID_CACHEIMPORTOFFER =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_CACHE_IMPORT_OFFER_PDU>(s, dispatcher, "RDPGFX_CACHE_IMPORT_OFFER_PDU");
+        case cmdIdEnum.RDPGFX_CMDID_CACHEIMPORTREPLY =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_CACHE_IMPORT_REPLY_PDU>(s, dispatcher, "RDPGFX_CACHE_IMPORT_REPLY_PDU");
+        case cmdIdEnum.RDPGFX_CMDID_CAPSADVERTISE =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_CAPS_ADVERTISE_PDU>(s, dispatcher, "RDPGFX_CAPS_ADVERTISE_PDU");
+        case cmdIdEnum.RDPGFX_CMDID_CAPSCONFIRM =>
+            DecodeSingleGraphicMessageAndDispatch<RDPGFX_CAPS_CONFIRM_PDU>(s, dispatcher, "RDPGFX_CAPS_CONFIRM_PDU");
+        default =>
+            throw "RDPEGFX: Undefined message cmdId: " + Utility.DecToHexFormat(4, commandId) + ".";
+    }
+}
+
+void DecodeSingleGraphicMessageAndDispatch<T>(stream s, void(T) dispatcher, string msgName)
+{
+    switch (s)
+    {
+        case m:T from BinaryDecoder<T> =>
+            dispatcher(m);
+        default =>
+            ThrowDecodingException("RDPEGFX", msgName);
+    }
+}
+
+// 2.2.2   Common Data Types
+type RDPGFX_POINT16
+{
+    short x;
+    short y;
+}
+        
+type RDPGFX_RECT16
+{
+    ushort left;
+    ushort top;
+    ushort right;
+    ushort bottom;
+}
+
+type RDPGFX_COLOR32
+{
+    byte B;
+    byte G;
+    byte R;
+    byte XA;
+}
+
+type RDPGFX_PIXELFORMAT
+{
+    format format;
+}
+
+pattern format = enum byte
+{
+    PIXEL_FORMAT_XRGB_8888 = 0x20,
+    PIXEL_FORMAT_ARGB_8888 = 0x21
+};
+
+message RDPGFX_HEADER
+{
+    cmdIdEnum cmdId;
+    ushort $"flags";
+    uint pduLength;
+}
+
+pattern cmdIdEnum = enum ushort
+{
+    RDPGFX_CMDID_WIRETOSURFACE_1        = 0x0001,
+    RDPGFX_CMDID_WIRETOSURFACE_2        = 0x0002,
+    RDPGFX_CMDID_DELETEENCODINGCONTEXT  = 0x0003,
+    RDPGFX_CMDID_SOLIDFILL              = 0x0004,
+    RDPGFX_CMDID_SURFACETOSURFACE       = 0x0005,
+    RDPGFX_CMDID_SURFACETOCACHE         = 0x0006,
+    RDPGFX_CMDID_CACHETOSURFACE         = 0x0007,
+    RDPGFX_CMDID_EVICTCACHEENTRY        = 0x0008,
+    RDPGFX_CMDID_CREATESURFACE          = 0x0009,
+    RDPGFX_CMDID_DELETESURFACE          = 0x000A,
+    RDPGFX_CMDID_STARTFRAME             = 0x000B,
+    RDPGFX_CMDID_ENDFRAME               = 0x000C,
+    RDPGFX_CMDID_FRAMEACKNOWLEDGE       = 0x000D,
+    RDPGFX_CMDID_RESETGRAPHICS          = 0x000E,
+    RDPGFX_CMDID_MAPSURFACETOOUTPUT     = 0x000F,
+    RDPGFX_CMDID_CACHEIMPORTOFFER       = 0x0010,
+    RDPGFX_CMDID_CACHEIMPORTREPLY       = 0x0011,
+    RDPGFX_CMDID_CAPSADVERTISE          = 0x0012,
+    RDPGFX_CMDID_CAPSCONFIRM            = 0x0013,
+} with Documentation{NameInDocumentation = "cmdId"};
+
+type RDPGFX_CAPSET
+{
+    version version where ValidationCheckEnumValue(InRange<RDPEGFX.version>(value), null, true, ReferenceType.Type, "RDPEGFX", "version", "RDPGFX_CAPSET", "0x00080004, 0x00080105", value);
+    uint capsDataLength;
+    ([|version == RDPEGFX.version.RDPGFX_CAPVERSION_8|] RDPGFX_CAPSET_VERSION8 | [|version == RDPEGFX.version.RDPGFX_CAPVERSION_81|] RDPGFX_CAPSET_VERSION81 | binary) capsData;
+}
+
+pattern version = enum uint
+{
+    RDPGFX_CAPVERSION_8  = 0x00080004,
+    RDPGFX_CAPVERSION_81 = 0x00080105,
+    ...
+};
+
+// 2.2.3   Graphics Messages
+message RDPGFX_WIRE_TO_SURFACE_PDU_1 : RDPGFX_HEADER
+{
+    ushort surfaceId;
+    RDPGFX_WIRE_TO_SURFACE_PDU_1_CodecId codecId where ValidationCheck(InRange<RDPGFX_WIRE_TO_SURFACE_PDU_1_CodecId>(value), this, "RDPEGFX: The codecId in message RDPGFX_WIRE_TO_SURFACE_PDU_1 must be one of 0x0000, 0x0001, 0x0003, 0x0008, 0x000A.");
+    RDPGFX_PIXELFORMAT pixelFormat;
+    RDPGFX_RECT16 destRect;
+    uint bitmapDataLength;
+    ([|codecId == RDPGFX_WIRE_TO_SURFACE_PDU_1_CodecId.RDPGFX_CODECID_CLEARCODEC|] CLEARCODEC_BITMAP_STREAM | 
+     [|codecId == RDPGFX_WIRE_TO_SURFACE_PDU_1_CodecId.RDPGFX_CODECID_CAVIDEO|] RFX_REMOTEFXCODEC_BITMAP_STREAM | 
+        binary) bitmapData with BinaryEncoding{WidthForComposedType = bitmapDataLength * 8 as int, Length = bitmapDataLength};
+            
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_WIRETOSURFACE_1;     // 0x0001
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_WIRE_TO_SURFACE_PDU_1 message";
+        summary += ", pduLength: " + pduLength.ToString();
+        summary += ", surfaceId: " + surfaceId.ToString();
+        summary += ", codecId: " + EnumToString(codecId, "RDPEGFX.RDPGFX_WIRE_TO_SURFACE_PDU_1_CodecId") + ".";
+        return summary;
+    }
+}
+
+message RDPGFX_WIRE_TO_SURFACE_PDU_2 : RDPGFX_HEADER
+{
+    ushort surfaceId;
+    RDPGFX_WIRE_TO_SURFACE_PDU_2_CodecId codecId where ValidationCheck(InRange<RDPGFX_WIRE_TO_SURFACE_PDU_2_CodecId>(value), this, "RDPEGFX: The codecId in message RDPGFX_WIRE_TO_SURFACE_PDU_2 must be 0x0009 (RDPGFX_CODECID_CAPROGRESSIVE).");
+    uint codecContextId;
+    RDPGFX_PIXELFORMAT pixelFormat;
+    uint bitmapDataLength;
+    ([|codecId == RDPGFX_WIRE_TO_SURFACE_PDU_2_CodecId.RDPGFX_CODECID_CAPROGRESSIVE|] RFX_PROGRESSIVE_BITMAP_STREAM | 
+        binary) bitmapData with BinaryEncoding{WidthForComposedType = bitmapDataLength * 8 as int, Length = bitmapDataLength};
+
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_WIRETOSURFACE_2;          // 0x0002
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_WIRE_TO_SURFACE_PDU_2 message";
+        summary += ", pduLength: " + pduLength.ToString();
+        summary += ", surfaceId: " + surfaceId.ToString();
+        summary += ", codecId: " + EnumToString(codecId, "RDPEGFX.RDPGFX_WIRE_TO_SURFACE_PDU_2_CodecId") + ".";
+        return summary;
+    }
+}
+
+message RDPGFX_DELETE_ENCODING_CONTEXT_PDU : RDPGFX_HEADER
+{
+    ushort surfaceId;
+    uint codecContextId;
+
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_DELETEENCODINGCONTEXT;     // 0x0003
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_DELETE_ENCODING_CONTEXT_PDU message";
+        summary += ", pduLength: " + pduLength.ToString();
+        summary += ", surfaceId: " + surfaceId.ToString() + ".";
+        return summary;
+    }
+}
+
+message RDPGFX_SOLIDFILL_PDU : RDPGFX_HEADER
+{
+    ushort surfaceId;
+    RDPGFX_COLOR32 fillPixel;
+    ushort fillRectCount;
+    array<RDPGFX_RECT16> fillRects with BinaryEncoding{Length = fillRectCount};
+        
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_SOLIDFILL;        // 0x0004
+        
+    override string ToString()
+    {
+        string summary = "RDPEGFX RDPGFX_SOLIDFILL_PDU message";
+        summary += ", pduLength: " + pduLength.ToString();
+        summary += ", surfaceId: " + surfaceId.ToString() + ".";
+        return summary;
+    }
+}
+
+message RDPGFX_SURFACE_TO_SURFACE_PDU : RDPGFX_HEADER
+{
+    ushort surfaceIdSrc;
+    ushort surfaceIdDest;
+    RDPGFX_RECT16 rectSrc;
+    ushort destPtsCount;
+    array<RDPGFX_POINT16> destPts with BinaryEncoding{Length= destPtsCount};
+        
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_SURFACETOSURFACE;     // 0x0005
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_SURFACE_TO_SURFACE_PDU message";
+        summary += ", pduLength: " + pduLength.ToString();
+        summary += ", surfaceIdSrc: " + surfaceIdSrc.ToString();
+        summary += ", surfaceIdDest: " + surfaceIdDest.ToString() + ".";
+        return summary;
+    }
+}
+
+message RDPGFX_SURFACE_TO_CACHE_PDU : RDPGFX_HEADER
+{
+    ushort surfaceId;
+    ulong cacheKey;
+    ushort cacheSlot;
+    RDPGFX_RECT16 rectSrc;
+        
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_SURFACETOCACHE;     // 0x0006
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_SURFACE_TO_CACHE_PDU message";
+        summary += ", pduLength: " + pduLength.ToString();
+        summary += ", surfaceId: " + surfaceId.ToString();
+        summary += ", cacheKey: " + cacheKey.ToString();
+        summary += ", cacheSlot: " + cacheSlot.ToString() + ".";
+        return summary;
+    }
+}
+
+message RDPGFX_CACHE_TO_SURFACE_PDU : RDPGFX_HEADER
+{
+    ushort cacheSlot;
+    ushort surfaceId;
+    ushort destPtsCount;
+    array<RDPGFX_POINT16> destPts with BinaryEncoding{Length = destPtsCount};
+        
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_CACHETOSURFACE;     // 0x0007
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_CACHE_TO_SURFACE_PDU message";
+        summary += ", pduLength: " + pduLength.ToString();
+        summary += ", cacheSlot: " + cacheSlot.ToString();
+        summary += ", surfaceId: " + surfaceId.ToString() + ".";
+        return summary;
+    }
+}
+
+message RDPGFX_EVICT_CACHE_ENTRY_PDU : RDPGFX_HEADER
+{
+    ushort cacheSlot;
+
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_EVICTCACHEENTRY;    // 0x0008
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_EVICT_CACHE_ENTRY_PDU message";
+        summary += ", pubLength: " + pduLength.ToString();
+        summary += ", cacheSlot: " + cacheSlot.ToString() + ".";
+        return summary;
+    }
+}
+
+message RDPGFX_CREATE_SURFACE_PDU : RDPGFX_HEADER
+{
+    ushort surfaceId;
+    ushort width;
+    ushort height;
+    RDPGFX_PIXELFORMAT pixelFormat;
+        
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_CREATESURFACE;      // 0x0009
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_CREATE_SURFACE_PDU message";
+        summary += ", pduLength: " + pduLength.ToString();
+        summary += ", surfaceId: " + surfaceId.ToString() + ".";
+        return summary;
+    }
+}
+
+message RDPGFX_DELETE_SURFACE_PDU : RDPGFX_HEADER
+{
+    ushort surfaceId;
+        
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_DELETESURFACE;      // 0x000A
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_DELETE_SURFACE_PDU message";
+        summary += ", pduLength: " + pduLength.ToString();
+        summary += ", surfaceId: " + surfaceId.ToString() + ".";
+        return summary;
+    }
+}
+
+message RDPGFX_START_FRAME_PDU : RDPGFX_HEADER
+{
+    TimeStamp timestamp;
+    uint frameId;
+        
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_STARTFRAME;         // 0x000B
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_START_FRAME_PDU message";
+        summary += ", pduLength: " + pduLength.ToString();
+        summary += ", frameId: " + frameId.ToString() + ".";
+        return summary;
+    }
+}
+
+type TimeStamp
+{
+    ushort milliseconds with BinaryEncoding{Width = 10, Endian = Endian.Big};
+    byte second with BinaryEncoding{Width = 6};
+    byte minute with BinaryEncoding{Width = 6};
+    ushort hour with BinaryEncoding{Width = 10, Endian = Endian.Big};
+} with BinaryEncoding{WidthForComposedType = 32, DecodeAsUnit = true};
+
+message RDPGFX_END_FRAME_PDU : RDPGFX_HEADER
+{
+    uint frameId;
+        
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_ENDFRAME;           // 0x000C
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_END_FRAME_PDU message";
+        summary += ", pduLength: " + pduLength.ToString();
+        summary += ", frameId: " + frameId.ToString() + ".";
+        return summary;
+    }
+}
+
+message RDPGFX_FRAME_ACKNOWLEDGE_PDU : RDPGFX_HEADER
+{
+    uint queueDepth;
+    uint frameId;
+    uint totalFramesDecoded;
+
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_FRAMEACKNOWLEDGE;   // 0x000D
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_FRAME_ACKNOWLEDGE_PDU message";
+        summary += ", pduLength: " + pduLength.ToString();
+        summary += ", frameId: " + frameId.ToString();
+        summary += ", totalFramesDecoded: " + totalFramesDecoded.ToString() + ".";
+        return summary;
+    }
+}
+
+message RDPGFX_RESET_GRAPHICS_PDU : RDPGFX_HEADER
+{
+    uint width;
+    uint height;
+    uint monitorCount;
+    array<TSMonitorDef> monitorDefArray with BinaryEncoding{Length = monitorCount};
+    binary pad with BinaryEncoding{Length = pduLength - 20 - 20 * monitorCount};
+
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_RESETGRAPHICS; // 0x000E
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_RESET_GRAPHICS_PDU message";
+        summary += ", pduLength: " + pduLength.ToString();
+        summary += ", width: " + width.ToString();
+        summary += ", height: " + height.ToString();
+        summary += ", monitorCount: " + monitorCount.ToString() + ".";
+        return summary;
+    }
+}
+
+message RDPGFX_MAP_SURFACE_TO_OUTPUT_PDU : RDPGFX_HEADER
+{
+    ushort surfaceId;
+    ushort reserved where ValidationCheck(value == 0, this, "RDPEGFX: The reserved in message RDPGFX_MAP_SURFACE_TO_OUTPUT_PDU must be set to zero.");
+    uint outputOriginX;
+    uint outputOriginY;
+        
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_MAPSURFACETOOUTPUT;   // 0x000F
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_MAP_SURFACE_TO_OUTPUT_PDU message";
+        summary += ", pduLength: " + pduLength.ToString();
+        summary += ", surfaceId: " + surfaceId.ToString();
+        summary += ", outputOriginX: " + outputOriginX.ToString();
+        summary += ", outputOriginY: " + outputOriginY.ToString() + ".";
+        return summary;
+    }
+}
+
+message RDPGFX_CACHE_IMPORT_OFFER_PDU : RDPGFX_HEADER
+{
+    ushort cacheEntriesCount;
+    array<RDPGFX_CACHE_ENTRY_METADATA> cacheEntries with BinaryEncoding{Length = cacheEntriesCount};
+        
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_CACHEIMPORTOFFER;       // 0x0010
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_CACHE_IMPORT_OFFER_PDU message";
+        summary += ", pduLength: " + pduLength.ToString();
+        summary += ", cacheEntriesCount: " + cacheEntriesCount.ToString() + ".";
+        return summary;
+    }
+}
+
+message RDPGFX_CACHE_IMPORT_REPLY_PDU : RDPGFX_HEADER
+{
+    ushort importedEntriesCount;
+    array<ushort> cacheSlots with BinaryEncoding{Length = importedEntriesCount};
+        
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_CACHEIMPORTREPLY;       // 0x0011
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_CACHE_IMPORT_REPLY_PDU message";
+        summary += ", pduLength: " + pduLength.ToString();
+        summary += ", importedEntriesCount: " + importedEntriesCount.ToString() + ".";
+        return summary;
+    }
+}
+
+message RDPGFX_CAPS_ADVERTISE_PDU : RDPGFX_HEADER
+{
+    ushort capsSetCount;
+    array<RDPGFX_CAPSET> capsSets with BinaryEncoding{Length = capsSetCount};
+
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_CAPSADVERTISE;          // 0x0012
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_CAPS_ADVERTISE_PDU message";
+        summary += ", pduLength: " + pduLength.ToString();
+        summary += ", capsSetCount: " + capsSetCount.ToString() + ".";
+        return summary;
+    }
+}
+
+message RDPGFX_CAPS_CONFIRM_PDU : RDPGFX_HEADER
+{
+    array<RDPGFX_CAPSET> capsSet;
+        
+    invariant cmdId == cmdIdEnum.RDPGFX_CMDID_CAPSCONFIRM;          // 0x0013
+        
+    override string ToString()
+    {
+        string summary = "RDPGFX_CAPS_CONFIRM_PDU message";
+        summary += ", pduLength: " + pduLength.ToString() + ".";
+        return summary;
+    }
+}
+
+pattern RDPGFX_WIRE_TO_SURFACE_PDU_1_CodecId = enum ushort
+{
+    RDPGFX_CODECID_UNCOMPRESSED = 0x0000,
+    RDPGFX_CODECID_NSCODEC      = 0x0001,
+    RDPGFX_CODECID_CAVIDEO      = 0x0003,
+    RDPGFX_CODECID_CLEARCODEC   = 0x0008,
+    RDPGFX_CODECID_PLANAR       = 0x000A,
+    ...
+} with Documentation{NameInDocumentation = "codecId"};
+
+pattern RDPGFX_WIRE_TO_SURFACE_PDU_2_CodecId = enum ushort
+{
+    RDPGFX_CODECID_CAPROGRESSIVE = 0x0009,
+    ...
+} with Documentation{NameInDocumentation = "codecId"};
+
+type RDPGFX_CACHE_ENTRY_METADATA
+{
+    ulong cacheKey;
+    uint bitmapLength;
+}
+
+type RDPGFX_CAPSET_VERSION8
+{
+    RDPGFX_CAPSET_VERSION8_FLAGS $"flags";
+}
+
+pattern RDPGFX_CAPSET_VERSION8_version = enum uint 
+{
+    RDPGFX_CAPVERSION_8 = 0x00080004,
+};
+
+pattern RDPGFX_CAPSET_VERSION8_FLAGS = flags uint
+{
+    RDPGFX_CAPS_FLAG_THINCLIENT = 0x00000001,
+    RDPGFX_CAPS_FLAG_SMALL_CACHE = 0x00000002
+} with Documentation{NameInDocumentation = "flags"};
+
+type RDPGFX_CAPSET_VERSION81
+{
+    RDPGFX_CAPSET_VERSION81_FLAGS $"flags";
+}
+
+pattern RDPGFX_CAPSET_VERSION81_version = enum uint 
+{
+    RDPGFX_CAPVERSION_81 = 0x0009003,
+};
+
+pattern RDPGFX_CAPSET_VERSION81_FLAGS = flags uint
+{
+    RDPGFX_CAPS_FLAG_THINCLIENT = 0x00000001,
+    RDPGFX_CAPS_FLAG_SMALL_CACHE = 0x00000002,
+    RDPGFX_CAPS_FLAG_H264ENABLED = 0x00000010
+} with Documentation{NameInDocumentation = "flags"};
+
+// 2.2.5  Bitmap Compression
+type CLEARCODEC_BITMAP_STREAM
+{
+    CLEARCODEC_BITMAP_STREAM_FLAGS $"flags";
+    byte seqNumber;
+    optional [|($"flags" & CLEARCODEC_BITMAP_STREAM_FLAGS.CLEARCODEC_FLAG_GLYPH_INDEX) > 0|] ushort glyphIndex where ValidationCheck(value == nothing || (value as ushort) < 3999, null, 
+        "RDPEGFX: The glyphIndex in type CLEARCODEC_BITMAP_STREAM must be in the range 0 (0x0000) to 3,999 (0x0F9F), inclusive, if present.");
+    optional [|($"flags" & CLEARCODEC_BITMAP_STREAM_FLAGS.CLEARCODEC_FLAG_GLYPH_HIT) == 0|] CLEARCODEC_COMPOSITE_PAYLOAD compositePayload;
+}
+
+pattern CLEARCODEC_BITMAP_STREAM_FLAGS = flags byte
+{
+    CLEARCODEC_FLAG_GLYPH_INDEX     = 0x01,
+    CLEARCODEC_FLAG_GLYPH_HIT       = 0x02,
+    CLEARCODEC_FLAG_CACHE_RESET     = 0x04,
+} with Documentation{NameInDocumentation = "flags"};
+
+type CLEARCODEC_COMPOSITE_PAYLOAD
+{
+    uint residualByteCount;
+    uint bandsByteCount;
+    uint subcodecByteCount;
+    optional [|residualByteCount > 0|] (CLEARCODEC_RESIDUAL_DATA | binary) residualData 
+        with BinaryEncoding{WidthForComposedType = residualByteCount * 8 as int, Length = residualByteCount};
+    optional [|bandsByteCount > 0|] (CLEARCODEC_BANDS_DATA | binary) bandsData 
+        with BinaryEncoding{WidthForComposedType = bandsByteCount * 8 as int, Length = bandsByteCount};
+    optional [|subcodecByteCount > 0|] (CLEARCODEC_SUBCODECS_DATA | binary) subcodecData 
+        with BinaryEncoding{WidthForComposedType = subcodecByteCount * 8 as int, Length = subcodecByteCount};
+}
+
+type CLEARCODEC_RESIDUAL_DATA
+{
+    array<CLEARCODEC_RGB_RUN_SEGMENT> runSegments;
+}
+
+type CLEARCODEC_RGB_RUN_SEGMENT
+{
+    byte blueValue;
+    byte greenValue;
+    byte redValue;
+    byte runLengthFactor1;
+    optional [|runLengthFactor1 == 0xFF|] ushort runLengthFactor2;
+    optional [|runLengthFactor2 == 0xFFFF|] uint runLengthFactor3;
+}
+
+type CLEARCODEC_BANDS_DATA
+{
+    array<CLEARCODEC_BAND> bands;
+}
+
+type CLEARCODEC_BAND 
+{
+    ushort xStart;
+    ushort xEnd;
+    ushort yStart;
+    ushort yEnd;
+    byte blueBkg;
+    byte greenBkg;
+    byte redBkg;
+    array<CLEARCODEC_VBAR> vBars with BinaryEncoding{Length = (xEnd - xStart + 1)};
+}
+
+type CLEARCODEC_VBAR
+{
+    (VBAR_CACHE_HIT | SHORT_VBAR_CACHE_HIT | SHORT_VBAR_CACHE_MISS) vBarHeader;
+    optional [|vBarHeader is SHORT_VBAR_CACHE_MISS|] array<COLOR_RGB> shortVBarPixels 
+        with BinaryEncoding{Length = ((vBarHeader as SHORT_VBAR_CACHE_MISS).shortVBarYOff - (vBarHeader as SHORT_VBAR_CACHE_MISS).shortVBarYOn)};
+}
+
+// 0b1xxx
+type VBAR_CACHE_HIT
+{    
+    byte x where value == 0x1 with BinaryEncoding{Width = 1};
+    ushort vBarIndex with BinaryEncoding{Width = 15, Endian=Endian.Big};
+} with BinaryEncoding{WidthForComposedType = 16, DecodeAsUnit = true};
+
+// 0b01xx 
+type SHORT_VBAR_CACHE_HIT
+{
+    byte shortVBarYOn;
+    byte x where value == 0x1 with BinaryEncoding{Width = 2};
+    ushort shortVBarIndex with BinaryEncoding{Width = 14, Endian=Endian.Big};
+} with BinaryEncoding{WidthForComposedType = 24, DecodeAsUnit = true};
+
+// 0b00xx
+type SHORT_VBAR_CACHE_MISS
+{
+    byte shortVBarYOn;
+    byte x where value == 0x0 with BinaryEncoding{Width = 2};
+    byte shortVBarYOff with BinaryEncoding{Width = 6};
+}
+
+type COLOR_RGB
+{
+    byte blue;
+    byte green;
+    byte red;
+}
+
+type CLEARCODEC_SUBCODECS_DATA
+{
+    array<CLEARCODEC_SUBCODEC> subcodecs;
+}
+
+type CLEARCODEC_SUBCODEC
+{
+    ushort xStart;
+    ushort yStart;
+    ushort width;
+    ushort height;
+    uint bitmapDataByteCount where ValidationCheck(value <= 3 * width * height, null,
+        "RDPEGFX: The bitmapDataByteCount in CLEARCODEC_SUBCODEC must not exceed " + (3 * width * height).ToString() 
+            + "(3 * width * height), current value is " + value.ToString() + ".");
+    byte subCodecId where ValidationCheck(value in {0x00, 0x01, 0x02}, null, "RDPEGFX: The subCodecId in type CLEARCODEC_SUBCODEC should be one of 0x00, 0x01, 0x02, not " + value.ToString() + ".");
+
+    ([|subCodecId == 0x00|] RLEX_RGB_TRIPLETs |
+     [|subCodecId == 0x01|] RDPNSC.NSCODEC_BITMAP_STREAM[width, height] |
+     [|subCodecId == 0x02|] CLEARCODEC_SUBCODEC_RLEX | binary) bitmapData 
+        with BinaryEncoding{WidthForComposedType = bitmapDataByteCount * 8 as int, Length = bitmapDataByteCount};
+}
+
+type CLEARCODEC_SUBCODEC_RLEX
+{
+    byte paletteCount;
+    array<RLEX_RGB_TRIPLET> paletteEntries with BinaryEncoding{Length = paletteCount};
+    array<CLEARCODEC_SUBCODEC_RLEX_SEGMENT> segments;
+}
+
+type RLEX_RGB_TRIPLETs
+{
+    array<RLEX_RGB_TRIPLET> Pixels;
+}
+
+type RLEX_RGB_TRIPLET
+{
+    byte blue;
+    byte green;
+    byte red;
+}
+
+type CLEARCODEC_SUBCODEC_RLEX_SEGMENT
+{
+    /* Bits count of suiteDepth field depends on value of paletteCount. (8 - log2(paletteCount - 1))
+     * Will further decode both field in rule defined in Server endpoint.
+    */ 
+    byte suiteDepth;
+    byte stopIndex with Encoding{Ignore = true};
+    byte runLengthFactor1;
+    optional [|runLengthFactor1 == 0xFF|] ushort runLengthFactor2;
+    optional [|runLengthFactor2 == 0xFFFF|] uint runLengthFactor3;
+}
+
+type RFX_REMOTEFXCODEC_BITMAP_STREAM
+{
+    array<RFX_REMOTEFXCODEC_DATABLOCK> remoteFXDataBlocks;
+}
+
+pattern RFX_REMOTEFXCODEC_DATABLOCK = TS_RFX_SYNC |
+                                    TS_RFX_CODEC_VERSIONS |
+                                    TS_RFX_CHANNELS |
+                                    TS_RFX_CONTEXT |
+                                    TS_RFX_FRAME_BEGIN |
+                                    TS_RFX_FRAME_END |
+                                    TS_RFX_REGION |
+                                    TS_RFX_TILESET |
+                                    TS_RFX_TILE;
+
+type RFX_PROGRESSIVE_BITMAP_STREAM
+{
+    array<RFX_PROGRESSIVE_DATABLOCK> progressiveDataBlocks;
+}
+
+pattern RFX_PROGRESSIVE_DATABLOCK = RFX_PROGRESSIVE_SYNC | 
+                                RFX_PROGRESSIVE_FRAME_BEGIN | 
+                                RFX_PROGRESSIVE_FRAME_END |
+                                RFX_PROGRESSIVE_CONTEXT |
+                                RFX_PROGRESSIVE_REGION |
+                                RFX_PROGRESSIVE_TILE_SIMPLE |
+                                RFX_PROGRESSIVE_TILE_FIRST |
+                                RFX_PROGRESSIVE_TILE_UPGRADE;
+
+pattern blockTypeEnum = enum ushort
+{
+    WBT_SYNC                        = 0xCCC0,
+    WBT_FRAME_BEGIN                 = 0xCCC1,
+    WBT_FRAME_END                   = 0xCCC2,
+    WBT_CONTEXT                     = 0xCCC3,
+    WBT_REGION                      = 0xCCC4,
+    WBT_TILE_SIMPLE                 = 0xCCC5,
+    WBT_TILE_PROGRESSIVE_FIRST      = 0xCCC6,
+    WBT_TILE_PROGRESSIVE_UPGRADE    = 0xCCC7
+};
+ 
+type RFX_PROGRESSIVE_SYNC
+{
+    blockTypeEnum blockType where value == blockTypeEnum.WBT_SYNC;
+    uint blockLen where ValidationCheck(value == 12, null, "RDPEGFX: The blockLen in type RFX_PROGRESSIVE_SYNC must be set to 12 (0x0000000C).");
+    uint magic where ValidationCheck(value == 0xCACCACCA, null, "RDPEGFX: The magic in type RFX_PROGRESSIVE_SYNC must be set to 0xCACCACCA.");
+    ushort version;
+}
+
+type RFX_PROGRESSIVE_FRAME_BEGIN
+{
+    blockTypeEnum blockType where value == blockTypeEnum.WBT_FRAME_BEGIN;
+    uint blockLen where ValidationCheck(value == 12, null, "RDPEGFX: The blockLen in type RFX_PROGRESSIVE_FRAME_BEGIN must be set to 12 (0x0000000C).");
+    uint frameIndex;
+    ushort regionCount;
+    array<RFX_PROGRESSIVE_REGION> regions with BinaryEncoding{Length = regionCount};
+}
+
+type RFX_PROGRESSIVE_FRAME_END
+{
+    blockTypeEnum blockType where value == blockTypeEnum.WBT_FRAME_END;
+    uint blockLen where ValidationCheck(value == 6, null, "RDPEGFX: The blockLen in type RFX_PROGRESSIVE_FRAME_END must be set to 6 (0x00000006).");
+}
+
+type RFX_PROGRESSIVE_CONTEXT
+{
+    blockTypeEnum blockType where value == blockTypeEnum.WBT_CONTEXT;
+    uint blockLen where ValidationCheck(value == 10, null, "RDPEGFX: The blockLen in type RFX_PROGRESSIVE_CONTEXT must be set to 10 (0x0000000A).");
+    byte ctxId where ValidationCheck(value == 0, null, "RDPEGFX: The ctxId in type RFX_PROGRESSIVE_CONTEXT must be set to zero.");
+    ushort tileSize where ValidationCheck(value == 0x0040, null, "RDPEGFX: The tileSize in type RFX_PROGRESSIVE_CONTEXT must be set to 0x0040.");
+    RFX_PROGRESSIVE_CONTEXT_FLAGS $"flags";
+}
+
+pattern RFX_PROGRESSIVE_CONTEXT_FLAGS = flags byte
+{
+    RFX_SUBBAND_DIFFING = 0x01,
+};
+
+type RFX_PROGRESSIVE_REGION
+{
+    blockTypeEnum blockType where value == blockTypeEnum.WBT_REGION;
+    uint blockLen;
+    byte tileSize where ValidationCheck(value == 0x40, null, "RDPEGFX: The tileSize in type RFX_PROGRESSIVE_REGION must be set to 0x40.");
+    ushort numRects where ValidationCheck(value > 0, null, "RDPEGFX: The numRects in type RFX_PROGRESSIVE_REGION must be greater than zero.");
+    byte numQuant where ValidationCheck(value > 0, null, "RDPEGFX: The numQuant in type RFX_PROGRESSIVE_REGION must be greater than zero.");
+    byte numProgQuant;
+    RFX_PROGRESSIVE_REGION_FLAGS $"flags";
+    ushort numTiles;
+    uint tileDataSize;
+    array<TS_RFX_RECT> rects with BinaryEncoding{Length = numRects};
+    array<TS_RFX_CODEC_QUANT> quantVals with BinaryEncoding{Length = numQuant};
+    array<RFX_PROGRESSIVE_CODEC_QUANT> quantProgVals with BinaryEncoding{Length = numProgQuant};
+    array<RFX_PROGRESSIVE_TILE_SIMPLE | RFX_PROGRESSIVE_TILE_FIRST | RFX_PROGRESSIVE_TILE_UPGRADE> tiles 
+        with BinaryEncoding{Length = numTiles};
+}
+
+pattern RFX_PROGRESSIVE_REGION_FLAGS = flags byte
+{
+    RFX_DWT_REDUCE_EXTRAPOLATE = 0x01,
+} with Documentation{NameInDocumentation = "flags"};
+
+type RFX_PROGRESSIVE_CODEC_QUANT
+{
+    byte quality where ValidationCheck(value >= 0 && value <= 100, null, "RDPEGFX: The quality in type RFX_PROGRESSIVE_CODEC_QUANT should be in the range of 0 to 100.");
+    TS_RFX_CODEC_QUANT yBitPos;
+    TS_RFX_CODEC_QUANT cbBitPos;
+    TS_RFX_CODEC_QUANT crBitPos;
+}
+
+type RFX_PROGRESSIVE_TILE_SIMPLE
+{
+    blockTypeEnum blockType where value == blockTypeEnum.WBT_TILE_SIMPLE;
+    uint blockLen;
+    byte quantIdxY;
+    byte quantIdxCb;
+    byte quantIdxCr;
+    ushort xIdx;
+    ushort xIdy;
+    RFX_PROGRESSIVE_TILE_SIMPLE_FLAGS $"flags";
+    ushort yLen;
+    ushort cbLen;
+    ushort crLen;
+    ushort tailLen where ValidationCheck(value in {0, 0x0008}, null, "RDPEGFX: The tailLen in type RFX_PROGRESSIVE_TILE_SIMPLE should be set to zero or 0x0008 in Microsoft RDP 8.0 servers.");
+    array<byte> yData with BinaryEncoding{Length = yLen};
+    array<byte> cbData with BinaryEncoding{Length = cbLen};
+    array<byte> crData with BinaryEncoding{Length = crLen};
+    array<byte> tailData  with BinaryEncoding{Length = tailLen};
+}
+
+pattern RFX_PROGRESSIVE_TILE_SIMPLE_FLAGS = flags byte
+{
+    RFX_TILE_DIFFERENCE = 0x01,
+} with Documentation{NameInDocumentation = "flags"};
+
+type RFX_PROGRESSIVE_TILE_FIRST
+{
+    blockTypeEnum blockType where value == blockTypeEnum.WBT_TILE_PROGRESSIVE_FIRST;
+    uint blockLen;
+    byte quantIdxY;
+    byte quantIdxCb;
+    byte quantIdxCr;
+    ushort xIdx;
+    ushort xIdy;
+    RFX_PROGRESSIVE_TILE_FIRST_FLAGS $"flags";
+    byte progressiveQuality;
+    ushort yLen;
+    ushort cbLen;
+    ushort crLen;
+    ushort tailLen where ValidationCheck(value == 0, null, "RDPEGFX: The tailLen in type RFX_PROGRESSIVE_TILE_FIRST should be set to zero.");
+    array<byte> yData with BinaryEncoding{Length = yLen};
+    array<byte> cbData with BinaryEncoding{Length = cbLen};
+    array<byte> crData with BinaryEncoding{Length = crLen};
+    array<byte> tailData  with BinaryEncoding{Length = tailLen};
+}
+
+pattern RFX_PROGRESSIVE_TILE_FIRST_FLAGS = flags byte
+{
+    RFX_TILE_DIFFERENCE = 0x01,
+} with Documentation{NameInDocumentation = "flags"};
+
+type RFX_PROGRESSIVE_TILE_UPGRADE
+{
+    blockTypeEnum blockType where value == blockTypeEnum.WBT_TILE_PROGRESSIVE_UPGRADE;
+    uint blockLen;
+    byte quantIdxY;
+    byte quantIdxCb;
+    byte quantIdxCr;
+    ushort xIdx;
+    ushort xIdy;
+    byte progressiveQuality;
+    ushort ySrlLen;
+    ushort yRawLen;
+    ushort cbSrlLen;
+    ushort cbRawLen;
+    ushort crSrlLen;
+    ushort crRawLen;
+    array<byte> ySrlData with BinaryEncoding{Length = ySrlLen};
+    array<byte> yRawData with BinaryEncoding{Length = yRawLen};
+    array<byte> cbSrlData with BinaryEncoding{Length = cbSrlLen};
+    array<byte> cbRawData with BinaryEncoding{Length = cbRawLen};
+    array<byte> crSrlData with BinaryEncoding{Length = crSrlLen};
+    array<byte> crRawData with BinaryEncoding{Length = crRawLen};
+}
+
+// 2.2.6 Data Packaging
+message RDP_SEGMENTED_DATA
+{
+    descriptorEnum descriptor;
+    optional [|descriptor == descriptorEnum.MULTIPART|] ushort segmentCount;
+    optional [|descriptor == descriptorEnum.MULTIPART|] uint uncompressedSize;
+    optional [|descriptor == descriptorEnum.SINGLE|] RDP8_BULK_ENCODED_DATA bulkData;
+    optional [|descriptor == descriptorEnum.MULTIPART|] array<RDP_DATA_SEGMENT> segmentArray with BinaryEncoding{Length = segmentCount as ushort};
+    
+    bool IsCompressed()
+    {
+        if (descriptor == descriptorEnum.SINGLE)
+        {
+            var seg = bulkData as RDP8_BULK_ENCODED_DATA;
+            return ((seg.header & CompressedSegmentHeader.PACKET_COMPRESSED) == CompressedSegmentHeader.PACKET_COMPRESSED);
+        }
+        else
+        {
+            var segArray = segmentArray as array<RDP_DATA_SEGMENT>; // segmentArray != nothing when MULTIPART descriptor.
+            foreach (var seg in segArray)
+            {
+                if (!((seg.bulkData.header & CompressedSegmentHeader.PACKET_COMPRESSED) == CompressedSegmentHeader.PACKET_COMPRESSED))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+    
+    override string ToString()
+    {
+        string summary = "RDPEGFX RDP_SEGMENTED_DATA message";
+        summary += ", descriptor: " + EnumToString(descriptor, "RDPEGFX.descriptorEnum");
+        summary += IsCompressed() ? ", PACKET_COMPRESSED" : "";
+        summary += uncompressedSize != nothing ? ", uncompressedSize: " + uncompressedSize.ToString() : "";
+        summary += segmentCount != nothing ? ", segmentCount: " + segmentCount.ToString() : "";
+        summary += ".";
+        return summary;
+    }
+}
+
+pattern descriptorEnum = enum byte
+{
+    SINGLE      = 0xE0,
+    MULTIPART   = 0xE1
+};
+
+type RDP_DATA_SEGMENT
+{
+    uint size;
+    RDP8_BULK_ENCODED_DATA bulkData with BinaryEncoding{WidthForComposedType = (size as int) * 8};
+}
+
+// 3.1.9.1.2.2   Compressed Segment Header
+pattern CompressedSegmentHeader = flags byte
+{
+    PACKET_COMPRESSED = 0x20,
+    PACKET_COMPR_TYPE_RDP8 = 0x04,
+    ...
+};
+
+type RDP8_BULK_ENCODED_DATA
+{
+    CompressedSegmentHeader header where ValidationCheck(InRange<CompressedSegmentHeader>(value), null, "RDPEGFX: Unknown compression type or flags.");
+    binary data;
+}
+
+/* Calculate bit number of a number, here in RDPEGFX usage, the bit number of a value is limited in 1~7.
+ *      power       0  1   2   3   4   5   7   8 ... 126 127
+ *      bit number  1  1   2   2   3   3   3   4 ...  7   7
+ */
+uint CalcBitNum(uint power)
+{
+    switch (power)
+    {
+        case 0
+            => return 1;
+        case uint where (value >> 1) == 0 
+            => return 1;
+        case uint where (value >> 2) == 0 
+            => return 2;
+        case uint where (value >> 3) == 0 
+            => return 3;
+        case uint where (value >> 4) == 0 
+            => return 4;
+        case uint where (value >> 5) == 0 
+            => return 5;
+        case uint where (value >> 6) == 0 
+            => return 6;
+        default 
+            => return 7;
+    }
+}

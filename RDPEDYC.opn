@@ -1,0 +1,868 @@
+protocol RDPEDYC with
+BinaryEncodingDefaults{Endian = Endian.Little},
+Documentation
+{
+    ProtocolName = "Remote Desktop Protocol: Dynamic Channel Virtual Channel Extension",
+    DocumentName = "MS-RDPEDYC",
+    ShortName = "RDPEDYC",
+    Description = ""
+},
+OPNAuthoring
+{
+    Copyright = "(c) Microsoft Corporation",
+    References = 
+        [
+            new Reference{Name = "MS-RDPEDYC", Version = "11.0", Date = "01/31/2013", ProgramName = ProgramName.MCPP},
+        ],
+    RevisionSummary =
+        [
+            new Revision{Class = RevisionClass.Major, Version = "372393", Date = "12/13/2014"}
+        ]
+};
+
+using Standard;
+using Utility;
+using RDPBCGR;
+using RDPEMT;
+using DTYP;
+using ERREF;
+using Reassembly;
+using Diagnostics;
+using RemoteDesktopResources;
+using InfrastructureResources;
+
+annotation string DVCDataPDU#EDYCChannelName;
+
+endpoint Server[uint channelID]
+    over ReassemblyServer
+    accepts DVCCapabilitiesResponsePDU issues DVCCapabilitiesRequestPDUV1 issues DVCCapabilitiesRequestPDUV2 issues DVCCapabilitiesRequestPDUV3
+    accepts DVCCreateResponsePDU issues DVCCreateRequestPDU
+    accepts DVCClose issues DVCClose 
+    accepts DVCDataPDU issues DVCDataPDU
+    accepts DVCDataFirstPDU issues DVCDataFirstPDU;
+                                    
+client endpoint Client connected to Server;
+
+endpoint ReassemblyServer[uint channelID]
+    over RDPBCGR.Server
+    accepts DVCDataPDU issues DVCDataPDU
+    accepts DVCDataFirstPDU issues DVCDataFirstPDU
+{
+    DecodingCache dvcDataIssuescache = new DecodingCache{};
+    long dvcDataRemainingLengthIssues = -1;
+    bool dataFirstReadyIssues = false;
+    
+    DecodingCache dvcDataAccpeptscache = new DecodingCache{};
+    long dvcDataRemainingLengthAccpepts = -1;
+    bool dataFirstReadyAccpepts = false;
+    
+    uint dataChannelID = 0;
+    
+    process this accepts d:DVCDataFirstPDU
+    {
+        dvcDataAccpeptscache.Buffer += d.Data;
+        CalculateDataRemainingLength(d, ref dvcDataRemainingLengthAccpepts);
+        dataFirstReadyAccpepts = true;
+        dvcDataAccpeptscache.Origins += [d];
+    }
+    
+    process this issues d:DVCDataFirstPDU
+    {
+        dvcDataIssuescache.Buffer += d.Data;
+        CalculateDataRemainingLength(d, ref dvcDataRemainingLengthIssues);
+        dataFirstReadyIssues = true;
+        dvcDataIssuescache.Origins += [d];
+    }
+    
+    process this accepts d:DVCDataPDU
+    {
+        dataChannelID = d.ChannelId;
+        if (dataFirstReadyAccpepts == false)
+        {
+            dispatch (endpoint Server[dataChannelID] over this) accepts d;
+        }
+        else
+        {
+            if (dvcDataRemainingLengthAccpepts > 0)
+            {
+                dvcDataAccpeptscache.Buffer += d.Data;
+                dvcDataRemainingLengthAccpepts = dvcDataRemainingLengthAccpepts - d.Data.Count;
+                dvcDataAccpeptscache.Origins += [d];
+            
+                if (dvcDataRemainingLengthAccpepts <= 0)
+                {
+                    DVCDataPDU dpdu = new DVCDataPDU
+                    {
+                        Cmd = d.Cmd,
+                        Sp = d.Sp,
+                        CbChId = d.CbChId,
+                        ChannelId = d.ChannelId,
+                        Data = dvcDataAccpeptscache.Buffer
+                    };
+
+                    dpdu.Origins = dvcDataAccpeptscache.Origins;
+                    dpdu.SourceData = dvcDataAccpeptscache.Buffer;
+                    dvcDataAccpeptscache.Buffer = $[];
+                    dvcDataAccpeptscache.Origins = [];
+                    dpdu.AssignFieldEncodingInfo("Data", 0, dvcDataAccpeptscache.Buffer.Count * 8);
+                    
+                    dispatch (endpoint Server[dataChannelID] over this) accepts dpdu;
+
+                    if (d#EDYCChannelName != nothing)
+                    {
+                        dpdu#EDYCChannelName = d#EDYCChannelName;
+                    }
+                    dataFirstReadyAccpepts = false;
+                }
+            }
+        }
+    }
+    
+    process this issues d:DVCDataPDU
+    {
+        dataChannelID = d.ChannelId;
+        if (dataFirstReadyIssues == false)
+        {
+            dispatch (endpoint Server[dataChannelID] over this) issues d;
+        }
+        else
+        {
+            if (dvcDataRemainingLengthIssues > 0)
+            {
+                dvcDataIssuescache.Buffer += d.Data;
+                dvcDataRemainingLengthIssues = dvcDataRemainingLengthIssues - d.Data.Count;
+                dvcDataIssuescache.Origins += [d];
+            
+                if (dvcDataRemainingLengthIssues <= 0)
+                {
+                    DVCDataPDU dpdu = new DVCDataPDU
+                    {
+                        Cmd = d.Cmd,
+                        Sp = d.Sp,
+                        CbChId = d.CbChId,
+                        ChannelId = d.ChannelId,
+                        Data = dvcDataIssuescache.Buffer
+                    };
+
+                    dpdu.Origins = dvcDataIssuescache.Origins;
+                    dpdu.SourceData = dvcDataIssuescache.Buffer;
+                    dvcDataIssuescache.Buffer = $[];
+                    dvcDataIssuescache.Origins = [];
+                    dpdu.AssignFieldEncodingInfo("Data", 0, dvcDataIssuescache.Buffer.Count * 8);
+                
+                    dispatch (endpoint Server[dataChannelID] over this) issues dpdu;
+                
+                    if (d#EDYCChannelName != nothing)
+                    {
+                        dpdu#EDYCChannelName = d#EDYCChannelName;
+                    }
+                    dataFirstReadyIssues = false;
+                }
+            }
+        }
+    }
+    
+    // destructor
+    ~endpoint(ReassemblyServer reassemblyServer)
+    {
+        reassemblyServer.dvcDataIssuescache.Clear();
+        reassemblyServer.dvcDataAccpeptscache.Clear();
+    }
+}
+
+type DecodingCache : DecodingCacheBase
+{
+}
+
+autostart actor RDPEDYCOverRDPBCGR(RDPBCGR.Server server)
+{
+    process server issues vcp:RDPBCGR.VirtualChannelPdu 
+        where (vcp#ChannelName != nothing && vcp#ChannelName == "drdynvc")
+    {
+        DecodeAndDispatchEDPEDYCRequest(vcp.virtualChannelData, server);
+    }
+    
+    process server accepts vcp:RDPBCGR.VirtualChannelPdu 
+        where (vcp#ChannelName != nothing && vcp#ChannelName == "drdynvc")
+    {
+        DecodeAndDispatchEDPEDYCResponse(vcp.virtualChannelData, server);
+    }
+    
+    // Future Reference : make the following 2 methods re-usable by actor RDPEDYCOverRDPEMT when the #77395
+    // Decode the binary as request message when the direction is "issues"
+    void DecodeAndDispatchEDPEDYCRequest(binary bin, RDPBCGR.Server server)
+    {        
+        byte cmd = GetCmd(bin);
+        uint channelID;
+        switch (cmd)
+        {
+            case 0x1 => // DVCCreateRequestPDU
+                var pdu = BinaryDecoder<DVCCreateRequestPDU>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCCreateRequestPDU");
+                }
+                DVCCreateRequestPDU msg = pdu as DVCCreateRequestPDU;
+                channelID = msg.ChannelId;
+                dispatch (endpoint Server[channelID] over server) issues msg;
+                ValidationCheck((!(channelID in server.channelNameMap) || server.channelNameMap[channelID] == ""), msg, 
+                    () => Format(RDPEDYC_MISSING_CLOSE_MESSAGE, Utility.DecToHexFormat(channelID)));
+                server.channelNameMap[channelID] = msg.ChannelName;
+            case 0x2 => // DVCDataFirstPDU
+                var pdu = BinaryDecoder<DVCDataFirstPDU>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCDataFirstPDU");
+                }
+                DVCDataFirstPDU msg = pdu as DVCDataFirstPDU;
+                channelID = msg.ChannelId;
+                dispatch (endpoint ReassemblyServer[channelID] over server) issues msg;
+            case 0x3 => // DVCDataPDU
+                var pdu = BinaryDecoder<DVCDataPDU>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCDataPDU");
+                }
+                DVCDataPDU msg = pdu as DVCDataPDU;
+                channelID = msg.ChannelId;
+                dispatch (endpoint ReassemblyServer[channelID] over server) issues msg;
+                if (channelID in server.channelNameMap.Keys)
+                {
+                    msg#EDYCChannelName = server.channelNameMap[channelID];
+                }
+            case 0x4 => // DVCClose
+                var pdu = BinaryDecoder<DVCClose>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCClose");
+                }
+                DVCClose msg = pdu as DVCClose;
+                channelID = msg.ChannelId;
+                dispatch (endpoint Server[channelID] over server) issues msg;
+                server.channelNameMap = server.channelNameMap.Remove(channelID);
+            case 0x5 => // DVCCapabilitiesRequestPDU
+                switch (bin[2])
+                {
+                    case 0x01 => // DVCCapabilitiesRequestPDUV1
+                        var pdu = BinaryDecoder<DVCCapabilitiesRequestPDUV1>(bin);
+                        if (pdu == nothing)
+                        {
+                            ThrowDecodingException("RDPEDYC", "DVCCapabilitiesRequestPDUV1");
+                        }
+                        dispatch (endpoint Server[0] over server) issues (pdu as DVCCapabilitiesRequestPDUV1);
+                    case 0x02 => // DVCCapabilitiesRequestPDUV2
+                        var pdu = BinaryDecoder<DVCCapabilitiesRequestPDUV2>(bin);
+                        if (pdu == nothing)
+                        {
+                            ThrowDecodingException("RDPEDYC", "DVCCapabilitiesRequestPDUV2");
+                        }
+                        dispatch (endpoint Server[0] over server) issues (pdu as DVCCapabilitiesRequestPDUV2);
+                    case 0x03 => // DVCCapabilitiesRequestPDUV3
+                        var pdu = BinaryDecoder<DVCCapabilitiesRequestPDUV3>(bin);
+                        if (pdu == nothing)
+                        {
+                            ThrowDecodingException("RDPEDYC", "DVCCapabilitiesRequestPDUV3");
+                        }
+                        dispatch (endpoint Server[0] over server) issues (pdu as DVCCapabilitiesRequestPDUV3);
+                    default =>
+                        ThrowDecodingException("RDPEDYC", "DVCCapabilitiesRequestPDU", UTILITY_INVALID_DATA_WITH_VALUE, ["Version", Utility.DecToHexFormat(bin[2])]);
+                }
+            default =>
+                ThrowDecodingException("RDPEDYC", UTILITY_INVALID_DATA_WITH_VALUE, ["Cmd", Utility.DecToHexFormat(cmd)]);
+        }
+    }
+
+    // Decode the binary as request message when the direction is "accepts"
+    void DecodeAndDispatchEDPEDYCResponse(binary bin, RDPBCGR.Server server)
+    {
+        byte cmd = GetCmd(bin);
+        uint channelID;
+        switch (cmd)
+        {
+            case 0x1 => // DVCCreateResponsePDU
+                var pdu = BinaryDecoder<DVCCreateResponsePDU>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCCreateResponsePDU");
+                }
+                DVCCreateResponsePDU msg = pdu as DVCCreateResponsePDU;
+                channelID = msg.ChannelId;
+                dispatch (endpoint Server[channelID] over server) accepts msg;
+            case 0x2 => // DVCDataFirstPDU
+                var pdu = BinaryDecoder<DVCDataFirstPDU>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCDataFirstPDU");
+                }
+                DVCDataFirstPDU msg = pdu as DVCDataFirstPDU;
+                channelID = msg.ChannelId;
+                dispatch (endpoint ReassemblyServer[channelID] over server) accepts msg;
+            case 0x3 => // DVCDataPDU
+                var pdu = BinaryDecoder<DVCDataPDU>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCDataPDU");
+                }
+                DVCDataPDU msg = pdu as DVCDataPDU;
+                channelID = msg.ChannelId;
+                dispatch (endpoint ReassemblyServer[channelID] over server) accepts msg;
+                if (channelID in server.channelNameMap.Keys)
+                {
+                    msg#EDYCChannelName = server.channelNameMap[channelID];
+                }
+            case 0x4 => // DVCClose
+                var pdu = BinaryDecoder<DVCClose>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCClose");
+                }
+                DVCClose msg = pdu as DVCClose;
+                channelID = msg.ChannelId;
+                dispatch (endpoint Server[channelID] over server) accepts msg;
+                server.channelNameMap = server.channelNameMap.Remove(channelID);
+            case 0x5 => // DVCCapabilitiesResponsePDU
+                var pdu = BinaryDecoder<DVCCapabilitiesResponsePDU>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCCapabilitiesResponsePDU");
+                }
+                dispatch (endpoint Server[0] over server) accepts (pdu as DVCCapabilitiesResponsePDU);
+            default =>
+                ThrowDecodingException("RDPEDYC", UTILITY_INVALID_DATA_WITH_VALUE, ["Cmd", Utility.DecToHexFormat(GetCmd(bin))]);
+        }
+    }
+}
+
+autostart actor RDPEDYCOverRDPEMT(RDPEMT.Server server)
+{
+    binary id = null;
+    RDPBCGR.DummyEndpoint dummyEPT = endpoint RDPBCGR.DummyEndpoint;
+    RDPBCGR.Server bcgrServer = null;
+
+    // channelNameMap used only when we cannot get the bcgrServer
+    map<uint, string> localChannelNameMap = {};
+    
+    observe server accepts tcreq:RDPEMT.RDP_TUNNEL_CREATEREQUEST
+    {
+        id = ConstructId(tcreq.RequestID, tcreq.SecurityCookie);
+    }
+
+    observe server issues tcrsp:RDP_TUNNEL_CREATERESPONSE
+    {
+        if (tcrsp.HrResponse != 0)
+        {
+            id = null;
+        }
+    }
+    
+    process server issues td:RDPEMT.RDP_TUNNEL_DATA 
+        where IsRDPEDYC(td.HigherLayerData)
+    {
+        DecodeAndDispatchEDPEDYCRequest(td.HigherLayerData);
+    }
+    
+    process server accepts td:RDPEMT.RDP_TUNNEL_DATA 
+        where IsRDPEDYC(td.HigherLayerData)
+    {
+        DecodeAndDispatchEDPEDYCResponse(td.HigherLayerData);
+    }
+    
+    // Decode the binary as request message when the direction is "issues"
+    void DecodeAndDispatchEDPEDYCRequest(binary bin)
+    {
+        byte cmd = GetCmd(bin);
+        uint channelID;
+        switch (cmd)
+        {
+            case 0x1 => // DVCCreateRequestPDU
+                var pdu = BinaryDecoder<DVCCreateRequestPDU>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCCreateRequestPDU");
+                }
+                DVCCreateRequestPDU msg = pdu as DVCCreateRequestPDU;
+                channelID = msg.ChannelId;
+                var lowerEPT = GetTransportInitializedEpt();
+                if (lowerEPT == null)
+                {
+                    dispatch (endpoint Server[channelID] over server) issues msg;
+                    ValidationCheck((!(channelID in localChannelNameMap) || localChannelNameMap[channelID] == ""), msg, 
+                        () => Format(RDPEDYC_MISSING_CLOSE_MESSAGE, Utility.DecToHexFormat(channelID)));
+                    localChannelNameMap[channelID] = msg.ChannelName;
+                }
+                else
+                {
+                    dispatch (endpoint Server[channelID] over lowerEPT) issues msg;
+                    ValidationCheck((!(channelID in lowerEPT.channelNameMap) || lowerEPT.channelNameMap[channelID] == ""), msg, 
+                        () => Format(RDPEDYC_MISSING_CLOSE_MESSAGE, Utility.DecToHexFormat(channelID)));
+                    lowerEPT.channelNameMap[channelID] = msg.ChannelName;
+                }
+            case 0x2 => // DVCDataFirstPDU
+                var pdu = BinaryDecoder<DVCDataFirstPDU>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCDataFirstPDU");
+                }
+                DVCDataFirstPDU msg = pdu as DVCDataFirstPDU;
+                channelID = msg.ChannelId;
+                var lowerEPT = GetTransportInitializedEpt();
+                if (lowerEPT == null)
+                {
+                    dispatch (endpoint ReassemblyServer[channelID] over server) issues msg;
+                }
+                else
+                {
+                    dispatch (endpoint ReassemblyServer[channelID] over lowerEPT) issues msg;
+                }
+            case 0x3 => // DVCDataPDU
+                var pdu = BinaryDecoder<DVCDataPDU>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCDataPDU");
+                }
+                DVCDataPDU msg = pdu as DVCDataPDU;
+                channelID = msg.ChannelId;
+                var lowerEPT = GetTransportInitializedEpt();
+                if (lowerEPT == null)
+                {
+                    dispatch (endpoint ReassemblyServer[channelID] over server) issues msg;
+                    if (channelID in localChannelNameMap)
+                    {
+                        msg#EDYCChannelName = localChannelNameMap[channelID];
+                    }
+                }
+                else
+                {
+                    dispatch (endpoint ReassemblyServer[channelID] over lowerEPT) issues msg;
+                    if (channelID in lowerEPT.channelNameMap.Keys)
+                    {
+                        msg#EDYCChannelName = lowerEPT.channelNameMap[channelID];
+                    }
+                }
+            case 0x4 => // DVCClose
+                var pdu = BinaryDecoder<DVCClose>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCClose");
+                }
+                DVCClose msg = pdu as DVCClose;
+                channelID = msg.ChannelId;
+                var lowerEPT = GetTransportInitializedEpt();
+                if (lowerEPT == null)
+                {
+                    dispatch (endpoint Server[channelID] over server) issues msg;
+                    localChannelNameMap = localChannelNameMap.Remove(channelID);
+                }
+                else
+                {
+                    dispatch (endpoint Server[channelID] over lowerEPT) issues msg;
+                    lowerEPT.channelNameMap = lowerEPT.channelNameMap.Remove(channelID);
+                }
+            case 0x5 => // DVCCapabilitiesRequestPDU
+                switch (bin[2])
+                {
+                    case 0x01 => // DVCCapabilitiesRequestPDUV1
+                        var pdu = BinaryDecoder<DVCCapabilitiesRequestPDUV1>(bin);
+                        if (pdu == nothing)
+                        {
+                            ThrowDecodingException("RDPEDYC", "DVCCapabilitiesRequestPDUV1");
+                        }
+                        dispatch (endpoint Server[0] over server) issues (pdu as DVCCapabilitiesRequestPDUV1);
+                    case 0x02 => // DVCCapabilitiesRequestPDUV2
+                        var pdu = BinaryDecoder<DVCCapabilitiesRequestPDUV2>(bin);
+                        if (pdu == nothing)
+                        {
+                            ThrowDecodingException("RDPEDYC", "DVCCapabilitiesRequestPDUV2");
+                        }
+                        dispatch (endpoint Server[0] over server) issues (pdu as DVCCapabilitiesRequestPDUV2);
+                    case 0x03 => // DVCCapabilitiesRequestPDUV3
+                        var pdu = BinaryDecoder<DVCCapabilitiesRequestPDUV3>(bin);
+                        if (pdu == nothing)
+                        {
+                            ThrowDecodingException("RDPEDYC", "DVCCapabilitiesRequestPDUV3");
+                        }
+                        dispatch (endpoint Server[0] over server) issues (pdu as DVCCapabilitiesRequestPDUV3);
+                    default =>
+                        ThrowDecodingException("RDPEDYC", "DVCCapabilitiesRequestPDU", UTILITY_INVALID_DATA_WITH_VALUE, ["Version", Utility.DecToHexFormat(bin[2])]);
+                }
+            default =>
+                ThrowDecodingException("RDPEDYC", UTILITY_INVALID_DATA_WITH_VALUE, ["Cmd", Utility.DecToHexFormat(cmd)]);
+        }
+    }
+
+    // Decode the binary as request message when the direction is "accepts"
+    void DecodeAndDispatchEDPEDYCResponse(binary bin)
+    {
+        byte cmd = GetCmd(bin);
+        uint channelID;
+        switch (cmd)
+        {
+            case 0x1 => // DVCCreateResponsePDU
+                var pdu = BinaryDecoder<DVCCreateResponsePDU>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCCreateResponsePDU");
+                }
+                DVCCreateResponsePDU msg = pdu as DVCCreateResponsePDU;
+                channelID = msg.ChannelId;
+                var lowerEPT = GetTransportInitializedEpt();
+                if (lowerEPT == null)
+                {
+                    dispatch (endpoint Server[channelID] over server) accepts msg;
+                }
+                else
+                {
+                    dispatch (endpoint Server[channelID] over lowerEPT) accepts msg;
+                }
+            case 0x2 => // DVCDataFirstPDU
+                var pdu = BinaryDecoder<DVCDataFirstPDU>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCDataFirstPDU");
+                }
+                DVCDataFirstPDU msg = pdu as DVCDataFirstPDU;
+                channelID = msg.ChannelId;
+                var lowerEPT = GetTransportInitializedEpt();
+                if (lowerEPT == null)
+                {
+                    dispatch (endpoint ReassemblyServer[channelID] over server) accepts msg;
+                }
+                else
+                {
+                    dispatch (endpoint ReassemblyServer[channelID] over lowerEPT) accepts msg;
+                }
+            case 0x3 => // DVCDataPDU
+                var pdu = BinaryDecoder<DVCDataPDU>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCDataPDU");
+                }
+                DVCDataPDU msg = pdu as DVCDataPDU;
+                channelID = msg.ChannelId;
+                var lowerEPT = GetTransportInitializedEpt();
+                if (lowerEPT == null)
+                {
+                    dispatch (endpoint ReassemblyServer[channelID] over server) accepts msg;
+                    if (channelID in localChannelNameMap)
+                    {
+                        msg#EDYCChannelName = localChannelNameMap[channelID];
+                    }
+                }
+                else
+                {
+                    dispatch (endpoint ReassemblyServer[channelID] over lowerEPT) accepts msg;
+                    if (channelID in lowerEPT.channelNameMap.Keys)
+                    {
+                        msg#EDYCChannelName = lowerEPT.channelNameMap[channelID];
+                    }
+                }
+            case 0x4 => // DVCClose
+                var pdu = BinaryDecoder<DVCClose>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCClose");
+                }
+                DVCClose msg = pdu as DVCClose;
+                channelID = msg.ChannelId;
+                var lowerEPT = GetTransportInitializedEpt();
+                if (lowerEPT == null)
+                {
+                    dispatch (endpoint Server[channelID] over server) accepts msg;
+                    localChannelNameMap = localChannelNameMap.Remove(channelID);
+                }
+                else
+                {
+                    dispatch (endpoint Server[channelID] over lowerEPT) accepts msg;
+                    lowerEPT.channelNameMap = lowerEPT.channelNameMap.Remove(channelID);
+                }
+            case 0x5 => // DVCCapabilitiesResponsePDU
+                var pdu = BinaryDecoder<DVCCapabilitiesResponsePDU>(bin);
+                if (pdu == nothing)
+                {
+                    ThrowDecodingException("RDPEDYC", "DVCCapabilitiesResponsePDU");
+                }
+                dispatch (endpoint Server[0] over server) accepts (pdu as DVCCapabilitiesResponsePDU);
+            default =>
+                ThrowDecodingException("RDPEDYC", UTILITY_INVALID_DATA_WITH_VALUE, ["Cmd", Utility.DecToHexFormat(GetCmd(bin))]);
+        }
+    }
+
+    RDPBCGR.Server GetTransportInitializedEpt()
+    {
+        if (bcgrServer == null)
+        {
+            if (id != null &&
+                id in dummyEPT.multiTransportMap)
+            {
+                bcgrServer = dummyEPT.multiTransportMap[id];
+            }
+        }
+
+        return bcgrServer;
+    }
+}
+
+bool IsRDPEDYC(binary bin)
+{
+    return bin.Count >= 4 && GetCmd(bin) in {1, 2, 3, 4, 5} && (bin[0] & 0x03) in {0, 1, 2, 3};
+}
+
+byte GetCmd(binary bin)
+{
+    return ((bin[0] & 0xF0) >> 4) as byte;
+}
+
+void CalculateDataRemainingLength(RDPEDYC.DVCDataFirstPDU dataFirstPDU, ref long dvcDataRemainingLength)
+{
+    if (dataFirstPDU.Length is byte)
+    {
+        byte dataLength = dataFirstPDU.Length as byte;
+        dvcDataRemainingLength = (dataLength as uint) - dataFirstPDU.Data.Count;
+    }
+    else if (dataFirstPDU.Length is ushort)
+    {
+        ushort dataLength = dataFirstPDU.Length as ushort;
+        dvcDataRemainingLength = (dataLength as uint) - dataFirstPDU.Data.Count;
+    }
+    else if (dataFirstPDU.Length is uint)
+    {
+        dvcDataRemainingLength = (dataFirstPDU.Length as uint) - dataFirstPDU.Data.Count;
+    }
+}
+
+message DVCCapabilitiesRequestPDUV1
+{
+    byte Cmd where ValidationCheckValue(value == 0x05, this, true, ReferenceType.Message, "RDPEDYC", "Cmd", "DVCCapabilitiesRequestPDUV1", "0x05", value) with BinaryEncoding{Width = 4},
+        Documentation {Description = "MUST be set to 0x05 (Capabilities)."};
+    byte Sp where ValidationCheckZero(value == 0x00, this, false, ReferenceType.Message, "RDPEDYC", "Sp", "DVCCapabilitiesRequestPDUV1", value) with BinaryEncoding{Width = 2},
+        Documentation {Description = "Unused. SHOULD be initialized to 0x00. Windows implementations initialize Sp to 0x02."};
+    byte CbChId where ValidationCheckZero(value == 0x00, this, true, ReferenceType.Message, "RDPEDYC", "CbChId", "DVCCapabilitiesRequestPDUV1", value) with BinaryEncoding{Width = 2},
+        Documentation {Description = "Unused. MUST be set to 0x00."};
+    byte Pad where ValidationCheckZero(value == 0x00, this, true, ReferenceType.Message, "RDPEDYC", "Pad", "DVCCapabilitiesRequestPDUV1", value)
+        with Documentation {Description = "An 8-bit unsigned integer. Unused. MUST be set to 0x00."};
+    ushort Version where ValidationCheckValue(value == 0x0001, this, true, ReferenceType.Message, "RDPEDYC", "Version", "DVCCapabilitiesRequestPDUV1", "0x0001", value)
+        with Documentation {Description = "A 16-bit unsigned integer. MUST be set to 0x0001."};
+        
+    override string ToString()
+    {
+        return "DVCCapabilitiesRequestPDUV1";
+    }
+}
+
+message DVCCapabilitiesRequestPDUV2
+{
+    byte Cmd where ValidationCheckValue(value == 0x05, this, true, ReferenceType.Message, "RDPEDYC", "Cmd", "DVCCapabilitiesRequestPDUV2", "0x05", value) with BinaryEncoding{Width = 4},
+        Documentation {Description = "MUST be set to 0x05 (Capabilities)."};
+    byte Sp where ValidationCheckZero(value == 0x00, this, false, ReferenceType.Message, "RDPEDYC", "Sp", "DVCCapabilitiesRequestPDUV2", value) with BinaryEncoding{Width = 2},
+        Documentation {Description = "Unused. SHOULD be initialized to 0x00. Windows implementations initialize Sp to 0x02."};
+    byte CbChId where ValidationCheckZero(value == 0x00, this, true, ReferenceType.Message, "RDPEDYC", "CbChId", "DVCCapabilitiesRequestPDUV2", value) with BinaryEncoding{Width = 2},
+        Documentation {Description = "Unused. MUST be set to 0x00."};
+    byte Pad where ValidationCheckZero(value == 0x00, this, true, ReferenceType.Message, "RDPEDYC", "Pad", "DVCCapabilitiesRequestPDUV2", value)
+        with Documentation {Description = "An 8-bit unsigned integer. Unused. MUST be set to 0x00."};
+    ushort Version where ValidationCheckValue(value == 0x0002, this, true, ReferenceType.Message, "RDPEDYC", "Version", "DVCCapabilitiesRequestPDUV2", "0x0002", value)
+        with Documentation {Description = "A 16-bit unsigned integer. MUST be set to 0x0002."};
+    ushort PriorityCharge0
+        with Documentation
+            {Description = "A 16-bit unsigned integer. Specifies the amount of bandwidth that is allotted for each priority class, in accordance with the following algorithm."};
+    ushort PriorityCharge1
+        with Documentation
+            {Description = "A 16-bit unsigned integer. Specifies the amount of bandwidth that is allotted for each priority class, in accordance with the following algorithm."};
+    ushort PriorityCharge2
+        with Documentation
+            {Description = "A 16-bit unsigned integer. Specifies the amount of bandwidth that is allotted for each priority class, in accordance with the following algorithm."};
+    ushort PriorityCharge3
+        with Documentation
+            {Description = "A 16-bit unsigned integer. Specifies the amount of bandwidth that is allotted for each priority class, in accordance with the following algorithm."};
+        
+    override string ToString()
+    {
+        return "DVCCapabilitiesRequestPDUV2";
+    }
+}
+
+message DVCCapabilitiesRequestPDUV3
+{
+    byte Cmd where ValidationCheckValue(value == 0x05, this, true, ReferenceType.Message, "RDPEDYC", "Cmd", "DVCCapabilitiesRequestPDUV3", "0x05", value) with BinaryEncoding{Width = 4};
+    byte Sp where ValidationCheckZero(value == 0x00, this, false, ReferenceType.Message, "RDPEDYC", "Sp", "DVCCapabilitiesRequestPDUV3", value) with BinaryEncoding{Width = 2};
+    byte CbChId where ValidationCheckZero(value == 0x00, this, true, ReferenceType.Message, "RDPEDYC", "CbChId", "DVCCapabilitiesRequestPDUV3", value) with BinaryEncoding{Width = 2};
+    byte Pad where ValidationCheckZero(value == 0x00, this, true, ReferenceType.Message, "RDPEDYC", "Pad", "DVCCapabilitiesRequestPDUV3", value);
+    ushort Version where ValidationCheckValue(value == 0x0003, this, true, ReferenceType.Message, "RDPEDYC", "Version", "DVCCapabilitiesRequestPDUV3", "0x0003", value);
+    ushort PriorityCharge0;
+    ushort PriorityCharge1;
+    ushort PriorityCharge2;
+    ushort PriorityCharge3;
+        
+    override string ToString()
+    {
+        return "DVCCapabilitiesRequestPDUV3";
+    }
+}
+
+// 2.2.1.2 Dynamic VC Capabilities Response PDU (DYNVC_CAPS_RSP)
+message DVCCapabilitiesResponsePDU
+{
+    byte Cmd where ValidationCheckValue(value == 0x05, this, true, ReferenceType.Message, "RDPEDYC", "Cmd", "DVCCapabilitiesResponsePDU", "0x05", value) with BinaryEncoding{Width = 4},
+        Documentation {Description = "MUST be set to 0x05 (Capabilities)."};
+    byte Sp where ValidationCheckZero(value == 0x00, this, true, ReferenceType.Message, "RDPEDYC", "Sp", "DVCCapabilitiesResponsePDU", value) with BinaryEncoding{Width = 2},
+        Documentation {Description = "Unused. MUST be set to 0x00."};
+    byte CbChId where ValidationCheckZero(value == 0x00, this, true, ReferenceType.Message, "RDPEDYC", "CbChId", "DVCCapabilitiesResponsePDU", value) with BinaryEncoding{Width = 2},
+        Documentation {Description = "Unused. MUST be set to 0x00."};
+    byte Pad where ValidationCheckZero(value == 0x00, this, true, ReferenceType.Message, "RDPEDYC", "Pad", "DVCCapabilitiesResponsePDU", value)
+        with Documentation {Description = "An 8-bit unsigned integer. Unused. MUST be set to 0x00."};
+    DYNVC_CAPS_RSP_Version Version 
+        where ValidationCheckEnumValue(InRange<DYNVC_CAPS_RSP_Version>(value), this, true, ReferenceType.Message, "RDPEDYC", "Version", "DVCCapabilitiesResponsePDU", "0x0001, 0x0002", value)
+        with Documentation
+            {Description = "A 16-bit unsigned integer that indicates the protocol version level supported; MUST be set to the version level supported."};
+        
+    override string ToString()
+    {
+        return "DVCCapabilitiesResponsePDU, Version: " + (Version as string);
+    }
+}
+
+pattern DYNVC_CAPS_RSP_Version = enum ushort
+{
+    Version1 = 0x0001 with Documentation {Description = "Version level one is supported."},
+    Version2 = 0x0002 with Documentation {Description = "Version level two is supported."},
+    Version3 = 0x0003 with Documentation {Description = "Version level three is supported."},
+    ...
+};
+
+// 2.2.2.1 Dynamic VC Create Request PDU (DYNVC_CREATE_REQ)
+message DVCCreateRequestPDU
+{
+    byte Cmd where ValidationCheckValue(value == 0x01, this, true, ReferenceType.Message, "RDPEDYC", "Cmd", "DVCCreateRequestPDU", "0x01", value) with BinaryEncoding{Width = 4},
+        Documentation {Description = "MUST be set to 0x01 (Create)."};
+    byte Pri with BinaryEncoding{Width = 2},
+        Documentation
+            {Description = "Version 1 of the Remote Desktop Protocol: Dynamic Channel Virtual Channel Extension (as specified in section ) does not support priority classes. The client SHOULD ignore this field."};
+    CbChIdLength CbChId where ValidationCheckEnumValue(InRange<CbChIdLength>(value), this, true, ReferenceType.Message, "RDPEDYC", "CbChId", "DVCCreateRequestPDU", "0x00, 0x01, 0x02", value) with BinaryEncoding{Width = 2},
+        Documentation {Description = "Indicates the length of the ChannelId field."};
+    uint ChannelId with BinaryEncoding{Width = CbChId in CbChIdLengthToBitMap.Keys ? CbChIdLengthToBitMap[CbChId] : 32},
+        Documentation {Description = "A variable-length 8-bit, 16-bit, or 32-bit unsigned integer. This is a server-generated identifier for the channel being created. The DVC server manager MUST ensure that this number is unique within a static virtual channel connection."};
+    string ChannelName with BinaryEncoding{TextEncoding = TextEncoding.ASCII},
+        Documentation
+           {Description = "A null-terminated ANSI encoded character string. The name of the listener on the TS client with which the TS server application is requesting that a channel be opened."};
+        
+    override string ToString()
+    {
+        return "DVCCreateRequestPDU, ChannelName: " + (ChannelName as string) + ", ChannelId: " + (ChannelId as string);
+    }
+}
+
+pattern CbChIdLength = enum byte
+{
+    Length1Byte = 0x00 with Documentation {Description = "The ChannelId field length is 1 byte."},
+    Length2Bytes = 0x01 with Documentation {Description = "The ChannelId field length is 2 bytes."},
+    Length4Bytes = 0x02 with Documentation {Description = "The ChannelId field length is 4 bytes."},
+    ...
+};
+
+const map<byte, uint> CbChIdLengthToBitMap =
+    {
+        0x00 -> 8,
+        0x01 -> 16,
+        0x02 -> 32
+    };
+    
+// 2.2.2.2 Dynamic VC Create Response PDU (DYNVC_CREATE_RSP)
+message DVCCreateResponsePDU
+{
+    byte Cmd where ValidationCheckValue(value == 0x01, this, true, ReferenceType.Message, "RDPEDYC", "Cmd", "DVCCreateResponsePDU", "0x01", value) with BinaryEncoding{Width = 4},
+        Documentation {Description = "MUST be set to 0x01 (Create)."};
+    byte Sp where ValidationCheckZero(value == 0x00, this, false, ReferenceType.Message, "RDPEDYC", "Sp", "DVCCreateResponsePDU", value) with BinaryEncoding{Width = 2},
+        Documentation {Description = "Unused. SHOULD be initialized to 0x00."};
+    CbChIdLength CbChId where ValidationCheckEnumValue(InRange<CbChIdLength>(value), this, true, ReferenceType.Message, "RDPEDYC", "CbChId", "DVCCreateResponsePDU", "0x00, 0x01, 0x02", value) with BinaryEncoding{Width = 2},
+        Documentation {Description = "Indicates the length of the ChannelId field."};
+    uint ChannelId with BinaryEncoding{Width = CbChId in CbChIdLengthToBitMap.Keys ? CbChIdLengthToBitMap[CbChId] : 32},
+        Documentation
+            {Description = "A variable length 8-bit, 16-bit, or 32-bit unsigned integer. Set to the value of the ChannelId in the DYNVC_CREATE_REQ PDU."};
+    DTYP.HRESULT CreationStatus with DisplayInfo{ToText = GetStatusString},
+       Documentation {Description = "A 32-bit, signed integer that specifies the NTSTATUS code that indicates success or failure of the client dynamic virtual channel creation. NTSTATUS codes are specified in [MS-ERREF] section . A zero or positive value indicates success; a negative value indicates failure."};
+        
+    override string ToString()
+    {
+        return "DVCCreateResponsePDU, CreationStatus: " + HResultValuesToText(CreationStatus as uint) + ", ChannelId: " + (ChannelId as string);
+    }
+    
+    static string GetStatusString(any data)
+    {
+        DTYP.HRESULT status = data as DTYP.HRESULT;
+        return HResultValuesToText(status as uint);
+    }
+}
+
+// 2.2.3.1 Dynamic VC Data First PDU (DYNVC_DATA_FIRST)
+message DVCDataFirstPDU
+{
+    byte Cmd where ValidationCheckValue(value == 0x02, this, true, ReferenceType.Message, "RDPEDYC", "Cmd", "DVCDataFirstPDU", "0x02", value) with BinaryEncoding{Width = 4},
+        Documentation {Description = "This field MUST be set to 0x02 (Data First)."};
+    DVCDataFirstLen Len where ValidationCheckEnumValue(InRange<DVCDataFirstLen>(value), this, true, ReferenceType.Message, "RDPEDYC", "Len", "DVCDataFirstPDU", "0x00, 0x01, 0x02", value) with BinaryEncoding{Width = 2},
+        Documentation {Description = "Indicates the length of the Length field."};
+    CbChIdLength CbChId where ValidationCheckEnumValue(InRange<CbChIdLength>(value), this, true, ReferenceType.Message, "RDPEDYC", "CbChId", "DVCDataFirstPDU", "0x00, 0x01, 0x02", value) with BinaryEncoding{Width = 2},
+        Documentation {Description = "Indicates the length of the ChannelId field."};
+    uint ChannelId with BinaryEncoding{Width = CbChId in CbChIdLengthToBitMap.Keys ? CbChIdLengthToBitMap[CbChId] : 32},
+        Documentation
+            {Description = "A variable-length 8-bit, 16-bit, or 32-bit unsigned integer. Set to the value of the ChannelId associated with the dynamic virtual channel on which the PDU is being sent."};
+    ([|Len == DVCDataFirstLen.Length1Byte|] byte | [|Len == DVCDataFirstLen.Length2Bytes|] ushort | [|Len == DVCDataFirstLen.Length4Bytes|] uint) Length
+        with Documentation
+            {Description = "A variable length 8-bit, 16-bit, or 32-bit unsigned integer. Set to total length of the message to be sent."};
+    binary Data with Documentation
+        {Description = "An array of bytes. The first block of data of a fragmented message. Message data is sent as 8-bit unsigned integers. The length of the data in this field is equal to 1,600 bytes minus the sum of the sizes of the previous fields."};
+        
+    override string ToString()
+    {
+        return "DVCDataFirstPDU, " + "ChannelId: " + (ChannelId as string) + ", Length: " + (Length as string);
+    }
+}
+
+pattern DVCDataFirstLen = enum byte
+{
+    Length1Byte = 0x0 with Documentation {Description = "Length field length is 1 byte."},
+    Length2Bytes = 0x1 with Documentation {Description = "Length field length is 2 bytes."},
+    Length4Bytes = 0x2 with Documentation {Description = "Length field length is 4 bytes."},
+    ...
+};
+
+// 2.2.3.2 Dynamic VC Data PDU (DYNVC_DATA)
+message DVCDataPDU
+{
+    byte Cmd where ValidationCheckValue(value == 0x03, this, true, ReferenceType.Message, "RDPEDYC", "Cmd", "DVCDataPDU", "0x03", value) with BinaryEncoding{Width = 4},
+        Documentation {Description = "MUST be set to 0x03 (Data)."};
+    byte Sp where ValidationCheck(value == 0x00, this, () => Format(INFRASTRUCTURE_STR_CHECK_VALUE, ["RDPEDYC", "Sp", "message", "DVCDataPDU", "should", "0x00", value.ToString()]) + " " + RDPEDYC_DATA_PDU_SP_WINDOWS_BEHAVIOUR)
+        with BinaryEncoding{Width = 2},
+            Documentation
+                {Description = "Unused. SHOULD be initialized to 0x00. windows implementations do not initialize this field. As a result, its value is random."};
+    CbChIdLength CbChId where ValidationCheckEnumValue(InRange<CbChIdLength>(value), this, true, ReferenceType.Message, "RDPEDYC", "CbChId", "DVCDataPDU", "0x00, 0x01, 0x02", value) 
+        with BinaryEncoding{Width = 2},
+        Documentation {Description = "Indicates the length of the ChannelId field."};
+    uint ChannelId with BinaryEncoding{Width = CbChId in CbChIdLengthToBitMap.Keys ? CbChIdLengthToBitMap[CbChId] : 32},
+        Documentation
+            {Description = "A variable-length 8-bit, 16-bit, or 32-bit unsigned integer. Set to the value of the ChannelId associated with the dynamic virtual channel upon which the PDU is being sent."};
+    binary Data with Documentation
+        {Description = "An array of bytes. Message data is sent as 8-bit unsigned integers.  The maximum size of the array is 1,600 minus the length of the DYNVC_DATA header in bytes. The actual size of this field is the length of the packet after reassembly, as described in [MS-RDPBCGR] section , minus the space taken for Cmd, Sp, cbChId, and ChannelId fields."};
+        
+    override string ToString()
+    {
+        return "DVCDataPDU, " + " ChannelId: " + (ChannelId as string);
+    }
+}
+
+// 2.2.4 Closing a Dynamic Virtual Channel (DYNVC_CLOSE)
+message DVCClose
+{
+    byte Cmd where ValidationCheckValue(value == 0x04, this, true, ReferenceType.Message, "RDPEDYC", "Cmd", "DVCClose", "0x04", value) with BinaryEncoding{Width = 4},
+        Documentation {Description = "MUST be set to 0x04. (Close)"};
+    byte Sp where ValidationCheckZero(value == 0x00, this, false, ReferenceType.Message, "RDPEDYC", "Sp", "DVCClose", value) with BinaryEncoding{Width = 2},
+        Documentation {Description = "Unused. SHOULD be initialized to 0x00."};
+    CbChIdLength CbChId where ValidationCheckEnumValue(InRange<CbChIdLength>(value), this, true, ReferenceType.Message, "RDPEDYC", "CbChId", "DVCClose", "0x00, 0x01, 0x02", value) with BinaryEncoding{Width = 2},
+        Documentation {Description = "Indicates the length of the ChannelId field."};
+    uint ChannelId with BinaryEncoding{Width = CbChId in CbChIdLengthToBitMap.Keys ? CbChIdLengthToBitMap[CbChId] : 32},
+        Documentation
+            {Description = "A variable length 8-bit, 16-bit, or 32-bit unsigned integer. Set to the value of the ChannelId associated with the dynamic virtual channel that is being closed."};
+        
+    override string ToString()
+    {
+        return "DVCClose, " + " ChannelId: " + (ChannelId as string);
+    }
+}

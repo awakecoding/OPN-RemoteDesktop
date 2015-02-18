@@ -1,0 +1,1708 @@
+protocol TSGU with
+Visualization{AliasName = "RDP"},
+Documentation
+{
+    ProtocolName = "Terminal Services Gateway Server Protocol",
+    ShortName = "TSGU",
+    Description = ""
+},
+OPNAuthoring
+{
+    Copyright = "(c) Microsoft Corporation",
+    References =
+        [
+            new Reference{Name = "MS-TSGU", Version = "31.0", Date = "08/08/2013", ProgramName = ProgramName.MCPP},
+        ],
+    RevisionSummary =
+        [
+            new Revision{Class=RevisionClass.Major, Version="372482", Date="12/16/2014"}
+        ]
+};
+
+using Technologies.IDL;
+using MSRPCE;
+using DTYP;
+using HTTP;
+using Utility;
+
+endpoint Server over MSRPCE.Server | over HTTP.Server
+                provides TsProxyRpcInterface
+                accepts HTTP_CHANNEL_PACKET issues HTTP_CHANNEL_RESPONSE
+                accepts HTTP_DATA_PACKET issues HTTP_DATA_PACKET
+                accepts HTTP_EXTENDED_AUTH_PACKET issues HTTP_EXTENDED_AUTH_PACKET
+                accepts HTTP_KEEPALIVE_PACKET issues HTTP_KEEPALIVE_PACKET
+                accepts HTTP_HANDSHAKE_REQUEST_PACKET issues HTTP_HANDSHAKE_RESPONSE_PACKET
+                accepts HTTP_REAUTH_MESSAGE issues HTTP_REAUTH_MESSAGE
+                accepts HTTP_TUNNEL_AUTH_PACKET issues HTTP_TUNNEL_AUTH_RESPONSE
+                accepts HTTP_TUNNEL_PACKET issues HTTP_TUNNEL_RESPONSE
+                accepts HTTP_SERVICE_MESSAGE issues HTTP_SERVICE_MESSAGE
+                accepts HTTP_CLOSE_PACKET issues HTTP_CLOSE_PACKET_RESPONSE;
+
+contract TsProxyRpcInterface
+{
+    accepts operation Opnum0NotUsedOnWire
+    {
+    }
+    with Technologies.IDL.IDL{Opnum = 0};
+
+    accepts operation TsProxyCreateTunnel
+    {
+        in PTSG_PACKET TSGPacket with Technologies.IDL.IDL{PointerType = PointerKind.RefPtr};
+        out PTSG_PACKET TSGPacketResponse
+                with Technologies.IDL.IDL
+                         {PointerType = PointerKind.RefPtr, IndirectionLevel = 1};
+        out PTUNNEL_CONTEXT_HANDLE_SERIALIZE tunnelContext
+                with Technologies.IDL.IDL{IndirectionLevel = 1};
+        out IDLUlong tunnelId with Technologies.IDL.IDL{IndirectionLevel = 1};
+        result HRESULT ReturnValue;
+
+        override string ToString()
+        {
+            string TSGPacketString;
+            string TSGPacketResponseString;
+
+            if(TSGPacket == null)
+                TSGPacketString = "";
+            else
+                TSGPacketString = TSGPacket.ToString();
+            if(TSGPacketResponse == null)
+                TSGPacketResponseString = "";
+            else
+                TSGPacketResponseString = TSGPacketResponse.ToString();
+
+            return
+                "TsProxyCreateTunnel, TSGPacket: " + TSGPacketString +
+                ", TSGPacketResponse: " + TSGPacketResponseString +
+                ", tunnelId: " + tunnelId.ToString() + ", ReturnValue: " +
+                ReturnValue.ToString();
+        }
+    }
+    with Technologies.IDL.IDL{Opnum = 1};
+
+    accepts operation TsProxyAuthorizeTunnel
+    {
+        in PTUNNEL_CONTEXT_HANDLE_NOSERIALIZE tunnelContext;
+        in PTSG_PACKET TSGPacket with Technologies.IDL.IDL{PointerType = PointerKind.RefPtr};
+        out PTSG_PACKET TSGPacketResponse
+                with Technologies.IDL.IDL
+                         {PointerType = PointerKind.RefPtr, IndirectionLevel = 1};
+        result HRESULT ReturnValue;
+
+        override string ToString()
+        {
+            string TSGPacketString;
+            string TSGPacketResponseString;
+
+            if(TSGPacket == null)
+                TSGPacketString = "";
+            else
+                TSGPacketString = TSGPacket.ToString();
+            if(TSGPacketResponse == null)
+                TSGPacketResponseString = "";
+            else
+                TSGPacketResponseString = TSGPacketResponse.ToString();
+
+            return
+                "TsProxyAuthorizeTunnel, TSGPacket: " +
+                TSGPacketString + ", TSGPacketResponse: " +
+                TSGPacketResponseString + ", ReturnValue: " +
+                ReturnValue.ToString();
+        }
+    }
+    with Technologies.IDL.IDL{Opnum = 2};
+
+    accepts operation TsProxyMakeTunnelCall
+    {
+        in PTUNNEL_CONTEXT_HANDLE_NOSERIALIZE tunnelContext;
+        in IDLUlong procId;
+        in PTSG_PACKET TSGPacket with Technologies.IDL.IDL{PointerType = PointerKind.RefPtr};
+        out PTSG_PACKET TSGPacketResponse
+                with Technologies.IDL.IDL
+                         {PointerType = PointerKind.RefPtr, IndirectionLevel = 1};
+        result HRESULT ReturnValue;
+        
+        override string ToString()
+        {
+            string TSGPacketString;
+            string TSGPacketResponseString;
+
+            if(TSGPacket == null)
+                TSGPacketString = "";
+            else
+                TSGPacketString = TSGPacket.ToString();
+            if(TSGPacketResponse == null)
+                TSGPacketResponseString = "";
+            else
+                TSGPacketResponseString = TSGPacketResponse.ToString();
+
+            return
+                "TsProxyMakeTunnelCall, procId: " + procId.ToString() +
+                ", TSGPacket: " + TSGPacketString +
+                ", TSGPacketResponse: " + TSGPacketResponseString +
+                ", ReturnValue: " + ReturnValue.ToString();
+        }
+    }
+    with Technologies.IDL.IDL{Opnum = 3};
+
+    accepts operation TsProxyCreateChannel
+    {
+        in PTUNNEL_CONTEXT_HANDLE_NOSERIALIZE tunnelContext;
+        in PTSENDPOINTINFO tsEndPointInfo
+               with Technologies.IDL.IDL
+                        {PointerType = PointerKind.RefPtr};
+        out PCHANNEL_CONTEXT_HANDLE_SERIALIZE channelContext
+                with Technologies.IDL.IDL{IndirectionLevel = 1};
+        out IDLUlong channelId with Technologies.IDL.IDL{IndirectionLevel = 1};
+        result HRESULT ReturnValue;
+
+        override string ToString()
+        {
+            string tsEndPointInfoString = "";
+            if(tsEndPointInfo != null)
+                tsEndPointInfoString = tsEndPointInfo.ToString();
+            return
+                "TsProxyCreateChannel" + ", tsEndPointInfo = " +
+                tsEndPointInfoString + ", channelId = " +
+                channelId.ToString() + ", ReturnValue = " +
+                ReturnValue.ToString();
+        }
+    }
+    with Technologies.IDL.IDL{Opnum = 4};
+
+    accepts operation Opnum5NotUsedOnWire
+    {
+    }
+    with Technologies.IDL.IDL{Opnum = 5};
+
+    accepts operation TsProxyCloseChannel
+    {
+        in out PCHANNEL_CONTEXT_HANDLE_NOSERIALIZE context
+                   with Technologies.IDL.IDL{IndirectionLevel = 1};
+        result HRESULT ReturnValue;
+
+        override string ToString()
+        {
+            return
+                "TsProxyCloseChannel, ReturnValue: " + ReturnValue.ToString();
+        }
+    }
+    with Technologies.IDL.IDL{Opnum = 6};
+    
+    accepts operation TsProxyCloseTunnel
+    {
+        in out PTUNNEL_CONTEXT_HANDLE_SERIALIZE context
+                   with Technologies.IDL.IDL{IndirectionLevel = 1};
+        result HRESULT ReturnValue;
+
+        override string ToString()
+        {
+            return
+                "TsProxyCloseTunnel, ReturnValue: " + ReturnValue.ToString();
+        }
+    }
+    with Technologies.IDL.IDL{Opnum = 7};
+
+    // The RPC runtime MUST NOT perform a strict NDR data consistency check for this method.
+    // The Remote Desktop  Gateway Server Protocol bypasses NDR for this method. The wire data MUST follow the regular RPC specifications as specified in [C706] section 2.1.
+    // And [MS-RPCE] minus all NDR headers, trailers, and NDR-specific payload.
+    // Operation 8 and 9 cannot use NDR decoding, the first field in pRpcMessage is ContextHandle, which contains value 00,00,00,00 as the first 4 bytes
+    // If use NDR decode, the pRpcMessage will be treat as null
+    // The two operations are manual decode
+    accepts operation TsProxySetupReceivePipe
+    {
+        in optional handle_t IDL_handle;
+        RDGClienttoRDGServerPacketFormat pRpcMessage;
+        out optional binary data;
+        result optional uint ReturnValue;
+
+        override string ToString()
+        {
+            return
+                "TsProxySetupReceivePipe, pRpcMessage: " +
+                pRpcMessage.ToString();
+        }
+    }
+    with Technologies.IDL.IDL{Opnum = 8};
+
+    accepts operation TsProxySendToServer
+    {
+        in optional handle_t IDL_handle;
+        in GenericSendDataMessagePacket pRpcMessage;
+        result HRESULT ReturnValue;
+
+        override string ToString()
+        {
+            return
+                "TsProxySendToServer, pRpcMessage: " +
+                pRpcMessage.ToString() + ", ReturnValue: " +
+                ReturnValue.ToString();
+        }
+    }
+    with Technologies.IDL.IDL{Opnum = 9};
+}
+with Technologies.IDL.IDL{Version = "1.3",
+                          Pointer_default = PointerKind.UniquePtr};
+
+// type for binary decode TsProxySetupReceivePipe(opnum9)
+type GenericSendDataMessagePacket
+{
+    ContextHandle PCHANNEL_CONTEXT_HANDLE_NOSERIALIZE_NR;
+    uint totalDataBytes with BinaryEncoding{Endian = Endian.Big};
+    uint numBuffers with BinaryEncoding{Endian = Endian.Big};
+    uint buffer1Length with BinaryEncoding{Endian = Endian.Big};
+    optional [|numBuffers > 1|] uint buffer2Length with BinaryEncoding{Endian = Endian.Big};
+    optional [|numBuffers > 2|] uint buffer3Length with BinaryEncoding{Endian = Endian.Big};
+    array<byte> buffer1 with BinaryEncoding{Length = buffer1Length};
+    optional [|numBuffers > 1|] array<byte> buffer2 with BinaryEncoding{Length = buffer2Length as uint};
+    optional [|numBuffers > 2|] array<byte> buffer3 with BinaryEncoding{Length = buffer3Length as uint};
+}with Encoding{EncodingKind = EncodingKind.Binary}, IDL{DoNotGenerate = true};
+
+// type for binary decode TsProxySetupReceivePipe(opnum 8)
+type RDGClienttoRDGServerPacketFormat
+{
+    ContextHandle PCHANNEL_CONTEXT_HANDLE_NOSERIALIZE_NR;
+}
+
+typedef PTSG_PACKET = TSG_PACKET with Technologies.IDL.IDL{IndirectionLevel = 1};
+typedef PTSENDPOINTINFO = tsendpointinfo with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_PACKET
+{
+    IDLUlong packetId;
+    TSG_PACKET_TYPE_UNION[packetId] TSGPacket
+        with Technologies.IDL.IDL{Switch_Is = packetId};
+
+    override string ToString()
+    {
+        return "packetId: " + packetId.ToString();
+    }
+}
+
+type TSG_PACKET_TYPE_UNION[IDLUlong tag]
+{
+    optional [|tag == 0x4844|] PTSG_PACKET_HEADER packetHeader
+        with Technologies.IDL.IDL{Case = [0x4844]};
+    optional [|tag == 0x5643|] PTSG_PACKET_VERSIONCAPS packetVersionCaps
+        with Technologies.IDL.IDL{Case = [0x5643]};
+    optional [|tag == 0x5143|] PTSG_PACKET_QUARCONFIGREQUEST packetQuarConfigRequest
+        with Technologies.IDL.IDL{Case = [0x5143]};
+    optional [|tag == 0x5152|] PTSG_PACKET_QUARREQUEST packetQuarRequest
+        with Technologies.IDL.IDL{Case = [0x5152]};
+    optional [|tag == 0x5052|] PTSG_PACKET_RESPONSE packetResponse
+        with Technologies.IDL.IDL{Case = [0x5052]};
+    optional [|tag == 0x4552|] PTSG_PACKET_QUARENC_RESPONSE packetQuarEncResponse
+        with Technologies.IDL.IDL{Case = [0x4552]};
+    optional [|tag == 0x4350|] PTSG_PACKET_CAPS_RESPONSE packetCapsResponse
+        with Technologies.IDL.IDL{Case = [0x4350]};
+    optional [|tag == 0x4752|] PTSG_PACKET_MSG_REQUEST packetMsgRequest
+        with Technologies.IDL.IDL{Case = [0x4752]};
+    optional [|tag == 0x4750|] PTSG_PACKET_MSG_RESPONSE packetMsgResponse
+        with Technologies.IDL.IDL{Case = [0x4750]};
+    optional [|tag == 0x4054|] PTSG_PACKET_AUTH packetAuth
+        with Technologies.IDL.IDL{Case = [0x4054]};
+    optional [|tag == 0x5250|] PTSG_PACKET_REAUTH packetReauth
+        with Technologies.IDL.IDL{Case = [0x5250]};
+}
+with Technologies.IDL.IDL
+         {Switch_Type = TypeOf<IDLUlong>(), UnionKind = UnionKind.NonEncapsulated};
+
+typedef PTSG_PACKET_TYPE_UNION = TSG_PACKET_TYPE_UNION with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_PACKET_HEADER
+{
+    ushort ComponentId where ValidationCheckValue(value == 0x5452, null, true, ReferenceType.Type, "TSGU", "ComponentId", "TSG_PACKET_HEADER", "0x5452", value);
+    ushort PacketId;
+}
+
+typedef PTSG_PACKET_HEADER = TSG_PACKET_HEADER with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_PACKET_VERSIONCAPS
+{
+    TSG_PACKET_HEADER tsgHeader;
+    PTSG_PACKET_CAPABILITIES TSGCaps
+        with Technologies.IDL.IDL{Size_is = [numCapabilities]};
+    IDLUlong numCapabilities
+        with Technologies.IDL.IDL{Range = new RangePattern {Low = 0, High = 32}};
+    ushort majorVersion where ValidationCheckValue(value == 0x0001, null, true, ReferenceType.Type, "TSGU", "majorVersion", "TSG_PACKET_VERSIONCAPS", "0x0001", value);
+    ushort minorVersion where ValidationCheckValue(value == 0x0001, null, true, ReferenceType.Type, "TSGU", "minorVersion", "TSG_PACKET_VERSIONCAPS", "0x0001", value);
+    ushort quarantineCapabilities where ValidationCheckValue(value == 0x0001, null, false, ReferenceType.Type, "TSGU", "quarantineCapabilities", "TSG_PACKET_VERSIONCAPS", "0x0001", value);
+}
+
+typedef PTSG_PACKET_VERSIONCAPS = TSG_PACKET_VERSIONCAPS with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_PACKET_CAPABILITIES
+{
+    IDLUlong capabilityType where ValidationCheckValue(value == 0x00000001, null, true, ReferenceType.Type, "TSGU", "capabilityType", "TSG_PACKET_CAPABILITIES", "0x00000001", value);
+    TSG_CAPABILITIES_UNION[capabilityType] TSGPacket
+        with Technologies.IDL.IDL{Switch_Is = capabilityType};
+}
+
+typedef PTSG_PACKET_CAPABILITIES = TSG_PACKET_CAPABILITIES with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_CAPABILITIES_UNION[IDLUlong tag]
+{
+    optional [|tag in {0x1}|] TSG_CAPABILITY_NAP TSGCapNap
+        with Technologies.IDL.IDL{Case = [0x1]};
+}
+with Technologies.IDL.IDL
+         {Switch_Type = TypeOf<IDLUlong>(), UnionKind = UnionKind.NonEncapsulated};
+
+typedef PTSG_CAPABILITIES_UNION = TSG_CAPABILITIES_UNION with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_CAPABILITY_NAP
+{
+    IDLUlong capabilities;
+}
+
+typedef PTSG_CAPABILITY_NAP = TSG_CAPABILITY_NAP with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_PACKET_QUARCONFIGREQUEST
+{
+    IDLUlong @flags;
+}
+
+typedef PTSG_PACKET_QUARCONFIGREQUEST = TSG_PACKET_QUARCONFIGREQUEST with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_PACKET_QUARREQUEST
+{
+    IDLUlong @flags;
+    string machineName
+        with Technologies.IDL.IDL{Size_is = [nameLength],
+                                  BaseStringType = TypeOf<wchar_t>(),
+                                  IndirectionLevel = 1};
+    IDLUlong nameLength
+        with Technologies.IDL.IDL{Range = new RangePattern {Low = 0, High = 513}};
+    byte data with Technologies.IDL.IDL{Size_is = [dataLen],
+                                        PointerType = PointerKind.UniquePtr,
+                                        IndirectionLevel = 1};
+    IDLUlong dataLen
+        with Technologies.IDL.IDL{Range = new RangePattern {Low = 0, High = 8000}};
+}
+
+typedef PTSG_PACKET_QUARREQUEST = TSG_PACKET_QUARREQUEST with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_PACKET_RESPONSE
+{
+    IDLUlong @flags;
+    IDLUlong reserved;
+    byte responseData
+        with Technologies.IDL.IDL{Size_is = [responseDataLen], IndirectionLevel = 1};
+    IDLUlong responseDataLen
+        with Technologies.IDL.IDL{Range = new RangePattern {Low = 0, High = 24000}};
+    TSG_REDIRECTION_FLAGS redirectionFlags;
+}
+
+typedef PTSG_PACKET_RESPONSE = TSG_PACKET_RESPONSE with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_REDIRECTION_FLAGS
+{
+    bool enableAllRedirections;
+    bool disableAllRedirections;
+    bool driveRedirectionDisabled;
+    bool printerRedirectionDisabled;
+    bool portRedirectionDisabled;
+    bool reserved;
+    bool clipboardRedirectionDisabled;
+    bool pnpRedirectionDisabled;
+}
+
+type TSG_PACKET_QUARENC_RESPONSE
+{
+    IDLUlong @flags where ValidationCheckValue(value == 0, null, false, ReferenceType.Type, "TSGU", "flags", "TSG_PACKET_QUARENC_RESPONSE", "0", value);
+    IDLUlong certChainLen
+        with Technologies.IDL.IDL{Range = new RangePattern {Low = 0, High = 24000}};
+    string certChainData
+        with Technologies.IDL.IDL{Size_is = [certChainLen],
+                                  BaseStringType = TypeOf<wchar_t>(),
+                                  IndirectionLevel = 1};
+    guid nonce;
+    PTSG_PACKET_VERSIONCAPS versionCaps;
+}
+
+typedef PTSG_PACKET_QUARENC_RESPONSE = TSG_PACKET_QUARENC_RESPONSE with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_PACKET_CAPS_RESPONSE
+{
+    TSG_PACKET_QUARENC_RESPONSE pktQuarEncResponse;
+    TSG_PACKET_MSG_RESPONSE pktConsentMessage;
+}
+
+typedef PTSG_PACKET_CAPS_RESPONSE = TSG_PACKET_CAPS_RESPONSE with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_PACKET_MSG_RESPONSE
+{
+    IDLUlong msgID;
+    IDLUlong msgType;
+    IDLLong isMsgPresent;
+    TSG_PACKET_TYPE_MESSAGE_UNION[msgType] messagePacket
+        with Technologies.IDL.IDL{Switch_Is = msgType};
+}
+
+typedef PTSG_PACKET_MSG_RESPONSE = TSG_PACKET_MSG_RESPONSE with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_PACKET_TYPE_MESSAGE_UNION[IDLUlong tag]
+{
+    optional [|tag in {0x1}|] PTSG_PACKET_STRING_MESSAGE consentMessage
+        with Technologies.IDL.IDL{Case = [0x1]};
+    optional [|tag in {0x2}|] PTSG_PACKET_STRING_MESSAGE serviceMessage
+        with Technologies.IDL.IDL{Case = [0x2]};
+    optional [|tag in {0x3}|] PTSG_PACKET_REAUTH_MESSAGE reauthMessage
+        with Technologies.IDL.IDL{Case = [0x3]};
+}
+with Technologies.IDL.IDL
+         {Switch_Type = TypeOf<IDLUlong>(), UnionKind = UnionKind.NonEncapsulated};
+
+type TSG_PACKET_STRING_MESSAGE
+{
+    IDLLong isDisplayMandatory;
+    IDLLong isConsentMandatory;
+    IDLUlong msgBytes
+        with Technologies.IDL.IDL{Range = new RangePattern {Low = 0, High = 65536}};
+    wchar_t msgBuffer
+        with Technologies.IDL.IDL{Size_is = [msgBytes], IndirectionLevel = 1};
+}
+
+typedef PTSG_PACKET_STRING_MESSAGE = TSG_PACKET_STRING_MESSAGE with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_PACKET_REAUTH_MESSAGE
+{
+    __uint64 tunnelContext;
+}
+
+typedef PTSG_PACKET_REAUTH_MESSAGE = TSG_PACKET_REAUTH_MESSAGE with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_PACKET_MSG_REQUEST
+{
+    IDLUlong maxMessagesPerBatch;
+}
+
+typedef PTSG_PACKET_MSG_REQUEST = TSG_PACKET_MSG_REQUEST with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_PACKET_AUTH
+{
+    TSG_PACKET_VERSIONCAPS TSGVersionCaps;
+    IDLUlong cookieLen
+        with Technologies.IDL.IDL{Range = new RangePattern {Low = 0, High = 65536}};
+    byte cookie
+        with Technologies.IDL.IDL{Size_is = [cookieLen], IndirectionLevel = 1};
+}
+
+typedef PTSG_PACKET_AUTH = TSG_PACKET_AUTH with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_PACKET_REAUTH
+{
+    __uint64 tunnelContext;
+    IDLUlong packetId;
+    TSG_INITIAL_PACKET_TYPE_UNION[packetId] TSGInitialPacket
+        with Technologies.IDL.IDL{Switch_Is = packetId};
+}
+
+typedef PTSG_PACKET_REAUTH = TSG_PACKET_REAUTH with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+type TSG_INITIAL_PACKET_TYPE_UNION[IDLUlong tag]
+{
+    optional [|tag in {0x5643}|] PTSG_PACKET_VERSIONCAPS packetVersionCaps
+        with Technologies.IDL.IDL{Case = [0x5643]};
+    optional [|tag in {0x4054}|] PTSG_PACKET_AUTH packetAuth
+        with Technologies.IDL.IDL{Case = [0x4054]};
+}
+with Technologies.IDL.IDL
+         {Switch_Type = TypeOf<IDLUlong>(), UnionKind = UnionKind.NonEncapsulated};
+
+typedef PTSG_INITIAL_PACKET_TYPE_UNION = TSG_INITIAL_PACKET_TYPE_UNION with Technologies.IDL.IDL{IndirectionLevel = 1};
+
+typedef PTUNNEL_CONTEXT_HANDLE_NOSERIALIZE = ContextHandle ;
+
+typedef PTUNNEL_CONTEXT_HANDLE_SERIALIZE = PTUNNEL_CONTEXT_HANDLE_NOSERIALIZE
+    with Technologies.IDL.IDL{Context_handle = true} ;
+
+type tsendpointinfo
+{
+    wchar_t resourceName
+        with Technologies.IDL.IDL
+                 {Size_is = [numResourceNames, null], IndirectionLevel = 2};
+    IDLUlong numResourceNames
+        with Technologies.IDL.IDL{Range = new RangePattern {Low = 0, High = 50}};
+    wchar_t alternateResourceNames
+        with Technologies.IDL.IDL{Size_is = [numAlternateResourceNames, null],
+                                  PointerType = PointerKind.UniquePtr,
+                                  IndirectionLevel = 2};
+    ushort numAlternateResourceNames
+        with Technologies.IDL.IDL{Range = new RangePattern {Low = 0, High = 3}};
+    IDLUlong Port;
+    
+    override string ToString()
+    {
+        return "numResourceNames: " + numResourceNames.ToString()
+                + "numAlternateResourceNames: " + numAlternateResourceNames.ToString()
+                + "Port: " + Port.ToString();
+    }
+}
+
+typedef PCHANNEL_CONTEXT_HANDLE_NOSERIALIZE = ContextHandle;
+
+typedef PCHANNEL_CONTEXT_HANDLE_SERIALIZE = PCHANNEL_CONTEXT_HANDLE_NOSERIALIZE
+    with Technologies.IDL.IDL{Context_handle = true} ;
+
+pattern _tsguOpnums = enum ushort
+{
+    Opnum0NotUsedOnWire = 0,
+    TsProxyCreateTunnel = 1,
+    TsProxyAuthorizeTunnel = 2,
+    TsProxyMakeTunnelCall = 3,
+    TsProxyCreateChannel = 4,
+    Opnum5NotUsedOnWire = 5,
+    TsProxyCloseChannel = 6,
+    TsProxyCloseTunnel = 7,
+    TsProxySetupReceivePipe = 8,
+    TsProxySendToServer = 9
+};
+
+contract _Extendedtsgu
+{
+    accepts operation EncryptedOperation
+    {
+        ushort Opnum;
+
+        override string ToString()
+        {
+            return EnumToString(Opnum, "TSGU._tsguOpnums") +
+                   ("(Encrypted, Opnum " + Opnum.ToString() + ")");
+        }
+    }
+    
+    accepts operation UnknownOperation
+    {
+        ushort Opnum;
+
+        override string ToString()
+        {
+            return "Unknown Operation (Opnum " + Opnum.ToString() + ")";
+        }
+    }
+}
+
+contract _ExtendedtsguMessages
+{
+    accepts message EncryptedRequest
+    {
+        binary EncryptedData;
+
+        override string ToString()
+        {
+            return EnumToString(this#RpcOpnum as ushort, "TSGU._tsguOpnums") +
+                   " Request(Encrypted)";
+        }
+    }
+    
+    issues message EncryptedResponse
+    {
+        binary EncryptedData;
+
+        override string ToString()
+        {
+            return EnumToString(this#RpcOpnum as ushort, "TSGU._tsguOpnums") +
+                   " Response(Encrypted)";
+        }
+    }
+    
+    accepts message UnknownRequest
+    {
+        binary UnknownData;
+
+        override string ToString()
+        {
+            return "Unknown Request";
+        }
+    }
+
+    issues message UnknownResponse
+    {
+        binary UnknownData;
+
+        override string ToString()
+        {
+            return "Unknown Response";
+        }
+    }
+}
+
+contract _tsguMessages
+{
+    accepts message _Opnum0NotUsedOnWireRequest
+    {
+    }
+
+    issues message _Opnum0NotUsedOnWireResponse
+    {
+    }
+
+    accepts message _TsProxyCreateTunnelRequest
+    {
+        PTSG_PACKET TSGPacket
+            with Technologies.IDL.IDL
+                     {PointerType = PointerKind.RefPtr};
+    }
+
+    issues message _TsProxyCreateTunnelResponse
+    {
+        PTSG_PACKET TSGPacketResponse
+            with Technologies.IDL.IDL
+                     {PointerType = PointerKind.RefPtr, IndirectionLevel = 1};
+        PTUNNEL_CONTEXT_HANDLE_SERIALIZE tunnelContext
+            with Technologies.IDL.IDL{IndirectionLevel = 1};
+        IDLUlong tunnelId with Technologies.IDL.IDL{IndirectionLevel = 1};
+        HRESULT ReturnValue;
+    }
+
+    accepts message _TsProxyAuthorizeTunnelRequest
+    {
+        PTUNNEL_CONTEXT_HANDLE_NOSERIALIZE tunnelContext;
+        PTSG_PACKET TSGPacket
+            with Technologies.IDL.IDL
+                     {PointerType = PointerKind.RefPtr};
+    }
+    
+    issues message _TsProxyAuthorizeTunnelResponse
+    {
+        PTSG_PACKET TSGPacketResponse
+            with Technologies.IDL.IDL
+                     {PointerType = PointerKind.RefPtr, IndirectionLevel = 1};
+        HRESULT ReturnValue;
+    }
+
+    accepts message _TsProxyMakeTunnelCallRequest
+    {
+        PTUNNEL_CONTEXT_HANDLE_NOSERIALIZE tunnelContext;
+        IDLUlong procId;
+        PTSG_PACKET TSGPacket
+            with Technologies.IDL.IDL
+                     {PointerType = PointerKind.RefPtr};
+    }
+    
+    issues message _TsProxyMakeTunnelCallResponse
+    {
+        PTSG_PACKET TSGPacketResponse
+            with Technologies.IDL.IDL
+                     {PointerType = PointerKind.RefPtr, IndirectionLevel = 1};
+        HRESULT ReturnValue;
+    }
+    
+    accepts message _TsProxyCreateChannelRequest
+    {
+        PTUNNEL_CONTEXT_HANDLE_NOSERIALIZE tunnelContext;
+        PTSENDPOINTINFO  tsEndPointInfo
+            with Technologies.IDL.IDL
+                     {PointerType = PointerKind.RefPtr};
+    }
+    
+    issues message _TsProxyCreateChannelResponse
+    {
+        PCHANNEL_CONTEXT_HANDLE_SERIALIZE channelContext
+            with Technologies.IDL.IDL{IndirectionLevel = 1};
+        IDLUlong channelId with Technologies.IDL.IDL{IndirectionLevel = 1};
+        HRESULT ReturnValue;
+    }
+
+    accepts message _Opnum5NotUsedOnWireRequest
+    {
+    }
+
+    issues message _Opnum5NotUsedOnWireResponse
+    {
+    }
+
+    accepts message _TsProxyCloseChannelRequest
+    {
+        PCHANNEL_CONTEXT_HANDLE_NOSERIALIZE context
+            with Technologies.IDL.IDL{IndirectionLevel = 1};
+    }
+
+    issues message _TsProxyCloseChannelResponse
+    {
+        PCHANNEL_CONTEXT_HANDLE_NOSERIALIZE context
+            with Technologies.IDL.IDL{IndirectionLevel = 1};
+        HRESULT ReturnValue;
+    }
+
+    accepts message _TsProxyCloseTunnelRequest
+    {
+        PTUNNEL_CONTEXT_HANDLE_SERIALIZE context
+            with Technologies.IDL.IDL{IndirectionLevel = 1};
+    }
+
+    issues message _TsProxyCloseTunnelResponse
+    {
+        PTUNNEL_CONTEXT_HANDLE_SERIALIZE context
+            with Technologies.IDL.IDL{IndirectionLevel = 1};
+        HRESULT ReturnValue;
+    }
+
+    accepts message _TsProxySetupReceivePipeRequest
+    {
+        optional handle_t IDL_handle;
+        RDGClienttoRDGServerPacketFormat pRpcMessage;
+    }
+
+    issues message _TsProxySetupReceivePipeResponse[RpcCoPfcFlags f, uint length]
+    {
+        optional [|f != RpcCoPfcFlags.PfcLastFrag|] binary data with BinaryEncoding{Length = length};
+        optional [|f == RpcCoPfcFlags.PfcLastFrag|] uint ReturnValue;
+    }
+
+    accepts message _TsProxySendToServerRequest
+    {
+        optional handle_t IDL_handle;
+        GenericSendDataMessagePacket pRpcMessage;
+    }
+    issues message _TsProxySendToServerResponse
+    {
+        HRESULT ReturnValue;
+    }
+}
+
+// actor for TSGU over MSRPCE
+autostart actor _tsguActor (MSRPCE.Server server)
+{
+    map<uint, any message> requestCache = {};
+    
+    process server accepts
+                rpcMsg:RpcconnRequestHdrT
+                    where server.MatchInterface(rpcMsg.PContId,
+                                                {44e265dd-7daf-42cd-8560-3cdb6e7a2729},
+                                                196609)
+    {
+        any message req;
+        if (rpcMsg.IsEncrypted && rpcMsg.Opnum is _tsguOpnums)
+        {
+            req =
+                BinaryDecoder<_ExtendedtsguMessages.EncryptedRequest>(rpcMsg.StubData) as
+                    _ExtendedtsguMessages.EncryptedRequest;
+            req#RpcOpnum = rpcMsg.Opnum;
+        }
+        else
+        {
+            NdrInfo ndrInfo =
+                new NdrInfo {isBigEndian = rpcMsg.IsBigEndian,
+                             isNdr64 = server.IsNdr64(rpcMsg.PContId),
+                             isMsUnion = false,
+                             defaultPointerKind = 2};
+            switch(rpcMsg.Opnum)
+            {
+                case $ 0 =>
+                    optional _tsguMessages._Opnum0NotUsedOnWireRequest m =
+                        NdrDecoder<_tsguMessages._Opnum0NotUsedOnWireRequest>(rpcMsg.StubData,
+                                                                              ndrInfo);
+                    if (m == nothing)
+                        throw
+                            "TSGU: Opnum0NotUsedOnWire request message (opnum 0) is not decoded successfully";
+                    req = m as _tsguMessages._Opnum0NotUsedOnWireRequest;
+                case $ 1 =>
+                    optional _tsguMessages._TsProxyCreateTunnelRequest m =
+                        NdrDecoder<_tsguMessages._TsProxyCreateTunnelRequest>(rpcMsg.StubData,
+                                                                              ndrInfo);
+                    if (m == nothing)
+                        throw
+                            "TSGU: TsProxyCreateTunnel request message (opnum 1) is not decoded successfully";
+                    req = m as _tsguMessages._TsProxyCreateTunnelRequest;
+                case $ 2 =>
+                    optional _tsguMessages._TsProxyAuthorizeTunnelRequest m =
+                        NdrDecoder<_tsguMessages._TsProxyAuthorizeTunnelRequest>(rpcMsg.StubData,
+                                                                                 ndrInfo);
+                    if (m == nothing)
+                        throw
+                            "TSGU: TsProxyAuthorizeTunnel request message (opnum 2) is not decoded successfully";
+                    req = m as _tsguMessages._TsProxyAuthorizeTunnelRequest;
+                case $ 3 =>
+                    optional _tsguMessages._TsProxyMakeTunnelCallRequest m =
+                        NdrDecoder<_tsguMessages._TsProxyMakeTunnelCallRequest>(rpcMsg.StubData,
+                                                                                ndrInfo);
+                    if (m == nothing)
+                        throw
+                            "TSGU: TsProxyMakeTunnelCall request message (opnum 3) is not decoded successfully";
+                    req = m as _tsguMessages._TsProxyMakeTunnelCallRequest;
+                case $ 4 =>
+                    optional _tsguMessages._TsProxyCreateChannelRequest m =
+                        NdrDecoder<_tsguMessages._TsProxyCreateChannelRequest>(rpcMsg.StubData,
+                                                                               ndrInfo);
+                    if (m == nothing)
+                        throw
+                            "TSGU: TsProxyCreateChannel request message (opnum 4) is not decoded successfully";
+                    req = m as _tsguMessages._TsProxyCreateChannelRequest;
+                case $ 5 =>
+                    optional _tsguMessages._Opnum5NotUsedOnWireRequest m =
+                        NdrDecoder<_tsguMessages._Opnum5NotUsedOnWireRequest>(rpcMsg.StubData,
+                                                                              ndrInfo);
+                    if (m == nothing)
+                        throw
+                            "TSGU: Opnum5NotUsedOnWire request message (opnum 5) is not decoded successfully";
+                    req = m as _tsguMessages._Opnum5NotUsedOnWireRequest;
+                case $ 6 =>
+                    optional _tsguMessages._TsProxyCloseChannelRequest m =
+                        NdrDecoder<_tsguMessages._TsProxyCloseChannelRequest>(rpcMsg.StubData,
+                                                                              ndrInfo);
+                    if (m == nothing)
+                        throw
+                            "TSGU: TsProxyCloseChannel request message (opnum 6) is not decoded successfully";
+                    req = m as _tsguMessages._TsProxyCloseChannelRequest;
+                case $ 7 =>
+                    optional _tsguMessages._TsProxyCloseTunnelRequest m =
+                        NdrDecoder<_tsguMessages._TsProxyCloseTunnelRequest>(rpcMsg.StubData,
+                                                                             ndrInfo);
+                    if (m == nothing)
+                        throw
+                            "TSGU: TsProxyCloseTunnel request message (opnum 7) is not decoded successfully";
+                    req = m as _tsguMessages._TsProxyCloseTunnelRequest;
+                case $ 8 =>
+                    // manual code to binary decode _TsProxySetupReceivePipeRequest
+                    optional _tsguMessages._TsProxySetupReceivePipeRequest m =
+                        BinaryDecoder<_tsguMessages._TsProxySetupReceivePipeRequest>(rpcMsg.StubData);
+                    if (m == nothing)
+                        throw
+                            "TSGU: TsProxySetupReceivePipe request message (opnum 8) is not decoded successfully";
+                    req = m as _tsguMessages._TsProxySetupReceivePipeRequest;
+                case $ 9 =>
+                    // modify code to binary decode _TsProxySetupReceivePipeRequest
+                    optional _tsguMessages._TsProxySendToServerRequest m =
+                        BinaryDecoder<_tsguMessages._TsProxySendToServerRequest>(rpcMsg.StubData);
+                    if (m == nothing)
+                        throw
+                            "TSGU: TsProxySendToServer request message (opnum 9) is not decoded successfully";
+                    req = m as _tsguMessages._TsProxySendToServerRequest;
+                default =>
+                    req =
+                        BinaryDecoder<_ExtendedtsguMessages.UnknownRequest>(rpcMsg.StubData) as
+                            _ExtendedtsguMessages.UnknownRequest;
+            }
+        }
+        req.Origins = [rpcMsg as any message];
+        if (rpcMsg.CallId in requestCache)
+        {
+            ReportInsufficientData(requestCache [rpcMsg.CallId],
+                                   DiagnosisLevel.Warning,
+                                   "TSGU: Incomplete tsgu operation due to response is missing when operation is constructed.");
+            dispatch endpoint  _ExtendedServer over server
+                accepts requestCache [rpcMsg.CallId];
+        }
+        requestCache [rpcMsg.CallId] = req;
+    }
+
+    process server issues
+                rpcMsg:RpcconnResponseHdrT
+                    where server.MatchInterface(rpcMsg.PContId,
+                                                {44e265dd-7daf-42cd-8560-3cdb6e7a2729},
+                                                196609)
+    {
+        if (rpcMsg#RpcOpnum == nothing)
+        {
+            assert ! (rpcMsg.CallId in requestCache) ,
+                "Found request with CallId " +
+                (rpcMsg.CallId.ToString() +
+                 " but the response with same CallId doesn\'t have annotation #RpcOpnum attached!");
+            var  res =
+                BinaryDecoder<_ExtendedtsguMessages.UnknownResponse>(rpcMsg.StubData) as
+                    _ExtendedtsguMessages.UnknownResponse;
+            ReportInsufficientData(res,
+                                   DiagnosisLevel.Warning,
+                                   "TSGU: Incomplete tsgu operation due to request is missing when operation is constructed.");
+            dispatch endpoint  _ExtendedServer over server issues res;
+            return;
+        }
+        any message req;
+        if (rpcMsg.CallId in requestCache)
+        {
+            req = requestCache [rpcMsg.CallId];
+            requestCache = requestCache.Remove(rpcMsg.CallId);
+        }
+        if (rpcMsg.IsEncrypted && (rpcMsg#RpcOpnum as ushort) is _tsguOpnums)
+        {
+            var  res = BinaryDecoder<_ExtendedtsguMessages.EncryptedResponse>(rpcMsg.StubData) as _ExtendedtsguMessages.EncryptedResponse;
+            res#RpcOpnum = rpcMsg#RpcOpnum as ushort;
+            res.Origins = [rpcMsg as any message];
+            if (req == null)
+            {
+                ReportInsufficientData(res,
+                                       DiagnosisLevel.Warning,
+                                       "TSGU: Incomplete tsgu operation due to request is missing when operation is constructed.");
+                dispatch endpoint  _ExtendedServer over server issues res;
+            }
+            else
+            {
+                var  op = new _Extendedtsgu.EncryptedOperation
+                              {Opnum = rpcMsg#RpcOpnum as ushort};
+                op.Origins = [req as any message, res as any message];
+                dispatch endpoint  _ExtendedServer over server accepts op;
+            }
+            return;
+        }
+        NdrInfo ndrInfo =
+            new NdrInfo {isBigEndian = rpcMsg.IsBigEndian,
+                         isNdr64 = server.IsNdr64(rpcMsg.PContId),
+                         isMsUnion = false,
+                         defaultPointerKind = 2};
+        switch(rpcMsg#RpcOpnum as ushort)
+        {
+            case $ 0 =>
+                _tsguMessages._Opnum0NotUsedOnWireRequest req0 =
+                    req as _tsguMessages._Opnum0NotUsedOnWireRequest;
+                optional _tsguMessages._Opnum0NotUsedOnWireResponse m =
+                    NdrDecoder<_tsguMessages._Opnum0NotUsedOnWireResponse>(rpcMsg.StubData,
+                                                                           ndrInfo);
+                if (m == nothing)
+                {
+                    if (req != null)
+                        dispatch endpoint  _ExtendedServer over server
+                            accepts req;
+                    throw
+                        "TSGU: Opnum0NotUsedOnWire response message (opnum 0) is not decoded successfully";
+                }
+                _tsguMessages._Opnum0NotUsedOnWireResponse res =
+                    m as _tsguMessages._Opnum0NotUsedOnWireResponse;
+                res.Origins = [rpcMsg as any message];
+                TsProxyRpcInterface.Opnum0NotUsedOnWire op = new TsProxyRpcInterface.Opnum0NotUsedOnWire {};
+                op.Origins = [req as any message, res as any message];
+                dispatch endpoint  Server over server accepts op;
+            case $ 1 =>
+                _tsguMessages._TsProxyCreateTunnelRequest req0 =
+                    req as _tsguMessages._TsProxyCreateTunnelRequest;
+                optional _tsguMessages._TsProxyCreateTunnelResponse m =
+                    NdrDecoder<_tsguMessages._TsProxyCreateTunnelResponse>(rpcMsg.StubData,
+                                                                           ndrInfo);
+                if (m == nothing)
+                {
+                    if (req != null)
+                        dispatch endpoint  _ExtendedServer over server
+                            accepts req;
+                    throw
+                        "TSGU: TsProxyCreateTunnel response message (opnum 1) is not decoded successfully";
+                }
+                _tsguMessages._TsProxyCreateTunnelResponse res =
+                    m as _tsguMessages._TsProxyCreateTunnelResponse;
+                res.Origins = [rpcMsg as any message];
+                TsProxyRpcInterface.TsProxyCreateTunnel op =
+                    new TsProxyRpcInterface.TsProxyCreateTunnel
+                        {TSGPacket = req0.TSGPacket,
+                         TSGPacketResponse = res.TSGPacketResponse,
+                         tunnelContext = res.tunnelContext,
+                         tunnelId = res.tunnelId,
+                         ReturnValue = res.ReturnValue};
+                op.Origins = [req as any message, res as any message];
+                dispatch endpoint  Server over server accepts op;
+            case $ 2 =>
+                _tsguMessages._TsProxyAuthorizeTunnelRequest req0 =
+                    req as _tsguMessages._TsProxyAuthorizeTunnelRequest;
+                optional _tsguMessages._TsProxyAuthorizeTunnelResponse m =
+                    NdrDecoder<_tsguMessages._TsProxyAuthorizeTunnelResponse>(rpcMsg.StubData,
+                                                                              ndrInfo);
+                if (m == nothing)
+                {
+                    if (req != null)
+                        dispatch endpoint  _ExtendedServer over server
+                            accepts req;
+                    throw
+                        "TSGU: TsProxyAuthorizeTunnel response message (opnum 2) is not decoded successfully";
+                }
+                _tsguMessages._TsProxyAuthorizeTunnelResponse res =
+                    m as _tsguMessages._TsProxyAuthorizeTunnelResponse;
+                res.Origins = [rpcMsg as any message];
+                TsProxyRpcInterface.TsProxyAuthorizeTunnel op =
+                    new TsProxyRpcInterface.TsProxyAuthorizeTunnel
+                        {tunnelContext = req0.tunnelContext,
+                         TSGPacket = req0.TSGPacket,
+                         TSGPacketResponse = res.TSGPacketResponse,
+                         ReturnValue = res.ReturnValue};
+                op.Origins = [req as any message, res as any message];
+                dispatch endpoint  Server over server accepts op;
+            case $ 3 =>
+                _tsguMessages._TsProxyMakeTunnelCallRequest req0 =
+                    req as _tsguMessages._TsProxyMakeTunnelCallRequest;
+                optional _tsguMessages._TsProxyMakeTunnelCallResponse m =
+                    NdrDecoder<_tsguMessages._TsProxyMakeTunnelCallResponse>(rpcMsg.StubData,
+                                                                             ndrInfo);
+                if (m == nothing)
+                {
+                    if (req != null)
+                        dispatch endpoint  _ExtendedServer over server
+                            accepts req;
+                    throw
+                        "TSGU: TsProxyMakeTunnelCall response message (opnum 3) is not decoded successfully";
+                }
+                _tsguMessages._TsProxyMakeTunnelCallResponse res =
+                    m as _tsguMessages._TsProxyMakeTunnelCallResponse;
+                res.Origins = [rpcMsg as any message];
+                TsProxyRpcInterface.TsProxyMakeTunnelCall op =
+                    new TsProxyRpcInterface.TsProxyMakeTunnelCall
+                        {tunnelContext = req0.tunnelContext,
+                         procId = req0.procId,
+                         TSGPacket = req0.TSGPacket,
+                         TSGPacketResponse = res.TSGPacketResponse,
+                         ReturnValue = res.ReturnValue};
+                op.Origins = [req as any message, res as any message];
+                dispatch endpoint  Server over server accepts op;
+            case $ 4 =>
+                _tsguMessages._TsProxyCreateChannelRequest req0 =
+                    req as _tsguMessages._TsProxyCreateChannelRequest;
+                optional _tsguMessages._TsProxyCreateChannelResponse m =
+                    NdrDecoder<_tsguMessages._TsProxyCreateChannelResponse>(rpcMsg.StubData,
+                                                                            ndrInfo);
+                if (m == nothing)
+                {
+                    if (req != null)
+                        dispatch endpoint  _ExtendedServer over server
+                            accepts req;
+                    throw
+                        "TSGU: TsProxyCreateChannel response message (opnum 4) is not decoded successfully";
+                }
+                _tsguMessages._TsProxyCreateChannelResponse res =
+                    m as _tsguMessages._TsProxyCreateChannelResponse;
+                res.Origins = [rpcMsg as any message];
+                TsProxyRpcInterface.TsProxyCreateChannel op =
+                    new TsProxyRpcInterface.TsProxyCreateChannel
+                        {tunnelContext = req0.tunnelContext,
+                         tsEndPointInfo = req0.tsEndPointInfo,
+                         channelContext = res.channelContext,
+                         channelId = res.channelId,
+                         ReturnValue = res.ReturnValue};
+                op.Origins = [req as any message, res as any message];
+                dispatch endpoint  Server over server accepts op;
+            case $ 5 =>
+                _tsguMessages._Opnum5NotUsedOnWireRequest req0 =
+                    req as _tsguMessages._Opnum5NotUsedOnWireRequest;
+                optional _tsguMessages._Opnum5NotUsedOnWireResponse m =
+                    NdrDecoder<_tsguMessages._Opnum5NotUsedOnWireResponse>(rpcMsg.StubData,
+                                                                           ndrInfo);
+                if (m == nothing)
+                {
+                    if (req != null)
+                        dispatch endpoint  _ExtendedServer over server
+                            accepts req;
+                    throw
+                        "TSGU: Opnum5NotUsedOnWire response message (opnum 5) is not decoded successfully";
+                }
+                _tsguMessages._Opnum5NotUsedOnWireResponse res =
+                    m as _tsguMessages._Opnum5NotUsedOnWireResponse;
+                res.Origins = [rpcMsg as any message];
+                TsProxyRpcInterface.Opnum5NotUsedOnWire op = new TsProxyRpcInterface.Opnum5NotUsedOnWire {};
+                op.Origins = [req as any message, res as any message];
+                dispatch endpoint  Server over server accepts op;
+            case $ 6 =>
+                _tsguMessages._TsProxyCloseChannelRequest req0 =
+                    req as _tsguMessages._TsProxyCloseChannelRequest;
+                optional _tsguMessages._TsProxyCloseChannelResponse m =
+                    NdrDecoder<_tsguMessages._TsProxyCloseChannelResponse>(rpcMsg.StubData,
+                                                                           ndrInfo);
+                if (m == nothing)
+                {
+                    if (req != null)
+                        dispatch endpoint  _ExtendedServer over server
+                            accepts req;
+                    throw
+                        "TSGU: TsProxyCloseChannel response message (opnum 6) is not decoded successfully";
+                }
+                _tsguMessages._TsProxyCloseChannelResponse res =
+                    m as _tsguMessages._TsProxyCloseChannelResponse;
+                res.Origins = [rpcMsg as any message];
+                TsProxyRpcInterface.TsProxyCloseChannel op =
+                    new TsProxyRpcInterface.TsProxyCloseChannel
+                        {context = res.context, ReturnValue = res.ReturnValue};
+                op.Origins = [req as any message, res as any message];
+                dispatch endpoint  Server over server accepts op;
+            case $ 7 =>
+                _tsguMessages._TsProxyCloseTunnelRequest req0 =
+                    req as _tsguMessages._TsProxyCloseTunnelRequest;
+                optional _tsguMessages._TsProxyCloseTunnelResponse m =
+                    NdrDecoder<_tsguMessages._TsProxyCloseTunnelResponse>(rpcMsg.StubData,
+                                                                          ndrInfo);
+                if (m == nothing)
+                {
+                    if (req != null)
+                        dispatch endpoint  _ExtendedServer over server
+                            accepts req;
+                    throw
+                        "TSGU: TsProxyCloseTunnel response message (opnum 7) is not decoded successfully";
+                }
+                _tsguMessages._TsProxyCloseTunnelResponse res =
+                    m as _tsguMessages._TsProxyCloseTunnelResponse;
+                res.Origins = [rpcMsg as any message];
+                TsProxyRpcInterface.TsProxyCloseTunnel op =
+                    new TsProxyRpcInterface.TsProxyCloseTunnel
+                        {context = res.context, ReturnValue = res.ReturnValue};
+                op.Origins = [req as any message, res as any message];
+                dispatch endpoint  Server over server accepts op;
+            case $ 8 =>
+                _tsguMessages._TsProxySetupReceivePipeRequest req0 =
+                    req as _tsguMessages._TsProxySetupReceivePipeRequest;
+
+                // modify code to binary decode _TsProxySetupReceivePipeResponse
+                optional _tsguMessages._TsProxySetupReceivePipeResponse m = BinaryDecoder<_tsguMessages._TsProxySetupReceivePipeResponse[rpcMsg.PfcFlags, rpcMsg.AllocHint as uint]>(rpcMsg.StubData);
+
+                if (m == nothing)
+                {
+                    if (req != null)
+                        dispatch endpoint  _ExtendedServer over server
+                            accepts req;
+                    throw
+                        "TSGU: TsProxySetupReceivePipe response message (opnum 8) is not decoded successfully";
+                }
+                _tsguMessages._TsProxySetupReceivePipeResponse res =
+                    m as _tsguMessages._TsProxySetupReceivePipeResponse;
+                res.Origins = [rpcMsg as any message];
+                TsProxyRpcInterface.TsProxySetupReceivePipe op =
+                    new TsProxyRpcInterface.TsProxySetupReceivePipe
+                        {IDL_handle = req0.IDL_handle,
+                         pRpcMessage = req0.pRpcMessage,
+                         ReturnValue = res.ReturnValue};
+                op.Origins = [req as any message, res as any message];
+                dispatch endpoint  Server over server accepts op;
+            case $ 9 =>
+                _tsguMessages._TsProxySendToServerRequest req0 =
+                    req as _tsguMessages._TsProxySendToServerRequest;
+                optional _tsguMessages._TsProxySendToServerResponse m =
+                    NdrDecoder<_tsguMessages._TsProxySendToServerResponse>(rpcMsg.StubData,
+                                                                           ndrInfo);
+                if (m == nothing)
+                {
+                    if (req != null)
+                        dispatch endpoint  _ExtendedServer over server
+                            accepts req;
+                    throw
+                        "TSGU: TsProxySendToServer response message (opnum 9) is not decoded successfully";
+                }
+                _tsguMessages._TsProxySendToServerResponse res =
+                    m as _tsguMessages._TsProxySendToServerResponse;
+                res.Origins = [rpcMsg as any message];
+                TsProxyRpcInterface.TsProxySendToServer op =
+                    new TsProxyRpcInterface.TsProxySendToServer
+                        {IDL_handle = req0.IDL_handle,
+                         pRpcMessage = req0.pRpcMessage,
+                         ReturnValue = res.ReturnValue};
+                op.Origins = [req as any message, res as any message];
+                dispatch endpoint  Server over server accepts op;
+            default =>
+                var  res =
+                    BinaryDecoder<_ExtendedtsguMessages.UnknownResponse>(rpcMsg.StubData) as
+                        _ExtendedtsguMessages.UnknownResponse;
+                res.Origins = [rpcMsg as any message];
+                assert req != null;
+                var  op = new _Extendedtsgu.UnknownOperation
+                              {Opnum = rpcMsg#RpcOpnum as ushort};
+                op.Origins = [req as any message, res as any message];
+                dispatch endpoint  _ExtendedServer over server accepts op;
+        }
+    }
+
+    ~endpoint(MSRPCE.Server server)
+    {
+        foreach(var  req in requestCache.Values)
+        {
+            ReportInsufficientData(req,
+                                   DiagnosisLevel.Warning,
+                                   "TSGU: Incomplete operation due to response is missing.");
+            release req;
+        }
+        requestCache = null;
+    }
+}
+
+endpoint _ExtendedServer
+    over MSRPCE.Server accepts any message issues any message;
+
+// actor for TSGU over HTTP
+autostart actor TSGUOverHTTP(HTTP.Server server)
+{
+    process server accepts req:HttpContract.Request where req.Payload.Count > 0 && IsTSGU(req.Uri)
+    {
+        var proxy = endpoint Server over server;
+        stream s = req.Payload;
+        switch(s.CurrentByte)
+        {
+            case 0x01 =>
+                DecodeMessage<HTTP_HANDSHAKE_REQUEST_PACKET>(AcceptDispatcher, proxy, s, "HTTP_HANDSHAKE_REQUEST_PACKET");
+            case 0x03 =>
+                DecodeMessage<HTTP_EXTENDED_AUTH_PACKET>(AcceptDispatcher, proxy, s,"HTTP_EXTENDED_AUTH_PACKET");
+            case 0x04 =>
+                DecodeMessage<HTTP_TUNNEL_PACKET>(AcceptDispatcher, proxy, s,"HTTP_TUNNEL_PACKET");
+            case 0x06 =>
+                DecodeMessage<HTTP_TUNNEL_AUTH_PACKET>(AcceptDispatcher, proxy, s,"HTTP_TUNNEL_AUTH_PACKET");
+            case 0x08 =>
+                DecodeMessage<HTTP_CHANNEL_PACKET>(AcceptDispatcher, proxy, s,"HTTP_CHANNEL_PACKET");
+            case 0x10 =>
+                DecodeMessage<HTTP_DATA_PACKET>(AcceptDispatcher, proxy, s,"HTTP_DATA_PACKET");
+            case 0x11 =>
+                DecodeMessage<HTTP_SERVICE_MESSAGE>(AcceptDispatcher, proxy, s,"HTTP_SERVICE_MESSAGE");
+            case 0x12 =>
+                DecodeMessage<HTTP_REAUTH_MESSAGE>(AcceptDispatcher, proxy, s,"HTTP_REAUTH_MESSAGE");
+            case 0x13 =>
+                DecodeMessage<HTTP_KEEPALIVE_PACKET>(AcceptDispatcher, proxy, s,"HTTP_KEEPALIVE_PACKET");
+            case 0x14 =>
+                DecodeMessage<HTTP_CLOSE_PACKET>(AcceptDispatcherClose, proxy, s,"HTTP_CLOSE_PACKET");
+            default =>
+                ThrowDecodingException("TSGU");
+        }
+    }
+    
+    process server issues res:HttpContract.Response where res.Payload.Count > 0 && res.StatusCode == 200 && IsTSGU(res#Uri)
+    {
+        var proxy = endpoint Server over server;
+        stream s = res.Payload;
+        switch(s.CurrentByte)
+        {
+            case 0x02 =>
+                DecodeMessage<HTTP_CHANNEL_RESPONSE>(IssueDispatcher, proxy, s, "HTTP_CHANNEL_RESPONSE");
+            case 0x03 =>
+                DecodeMessage<HTTP_EXTENDED_AUTH_PACKET>(IssueDispatcher, proxy, s, "HTTP_EXTENDED_AUTH_PACKET");
+            case 0x05 =>
+                DecodeMessage<HTTP_TUNNEL_AUTH_RESPONSE>(IssueDispatcher, proxy, s, "PKT_TYPE_TUNNEL_RESPONSE");
+            case 0x07 =>
+                DecodeMessage<HTTP_TUNNEL_AUTH_RESPONSE>(IssueDispatcher, proxy, s, "HTTP_TUNNEL_AUTH_RESPONSE");
+            case 0x09 =>
+                DecodeMessage<HTTP_CHANNEL_RESPONSE>(IssueDispatcher, proxy, s, "HTTP_CHANNEL_RESPONSE");
+            case 0x10 =>
+                DecodeMessage<HTTP_DATA_PACKET>(IssueDispatcher, proxy, s, "HTTP_DATA_PACKET");
+            case 0x11 =>
+                DecodeMessage<HTTP_SERVICE_MESSAGE>(IssueDispatcher, proxy, s, "HTTP_SERVICE_MESSAGE");
+            case 0x12 =>
+                DecodeMessage<HTTP_REAUTH_MESSAGE>(IssueDispatcher, proxy, s, "HTTP_REAUTH_MESSAGE");
+            case 0x13 =>
+                DecodeMessage<HTTP_KEEPALIVE_PACKET>(IssueDispatcher, proxy, s, "HTTP_KEEPALIVE_PACKET");
+            case 0x15 =>
+                DecodeMessage<HTTP_CLOSE_PACKET_RESPONSE>(IssueDispatcherCloseResponse, proxy, s, "HTTP_CLOSE_PACKET_RESPONSE");
+            default =>
+                ThrowDecodingException("TSGU");
+        }
+    }
+    
+    bool IsTSGU(optional UriType uriType)
+    {
+        return (uriType is uri:UriType) && uri.AbsPath is absPath:string && absPath.Contains("/remoteDesktopGateway/");
+    }
+
+    void AcceptDispatcher(TSGU.Server proxy, HTTP_PACKET_HEADER msg)
+    {
+        dispatch proxy accepts msg;
+    }
+
+    void AcceptDispatcherClose(TSGU.Server proxy, HTTP_CLOSE_PACKET msg)
+    {
+        dispatch proxy accepts msg;
+    }
+
+    void IssueDispatcher(TSGU.Server proxy, HTTP_PACKET_HEADER msg)
+    {
+        dispatch proxy issues msg;
+    }
+
+    void IssueDispatcherCloseResponse(TSGU.Server proxy, HTTP_CLOSE_PACKET_RESPONSE msg)
+    {
+        dispatch proxy issues msg;
+    }
+
+    void DecodeMessage<T>(void(TSGU.Server, T) dispatcher, TSGU.Server proxy, stream payloadStream, string messageName)
+    {
+        optional T optionalMSG = BinaryDecoder<T>(payloadStream);
+
+        if (optionalMSG != nothing)
+        {
+            T msg = optionalMSG as T;
+            dispatcher(proxy, msg);
+        }
+        else
+        {
+            ThrowDecodingException("TSGU", messageName);
+        }
+    }
+}
+
+// 2.2.10.1   HTTP_byte_BLOB Structure
+type HTTP_byte_BLOB
+{
+    ushort cbLen;
+    optional [|cbLen != 0|] array<byte> blob with BinaryEncoding{Length = cbLen};
+}with Encoding{EncodingKind = EncodingKind.Binary}, IDL{DoNotGenerate = true};
+
+// 2.2.10.2   HTTP_CHANNEL_PACKET Structure
+message HTTP_CHANNEL_PACKET : HTTP_PACKET_HEADER
+{
+    invariant (packetType == packetTypeEnum.PKT_TYPE_EXTENDED_AUTH_MSG);
+
+    byte numResources where ValidationCheckValueInRange(value > 0 && value < 51, null, true, ReferenceType.Message, "TSGU", "numResources", "HTTP_CHANNEL_PACKET", "1", "50", value);
+    byte numAltResources where ValidationCheckValueInRange(value > -1 && value < 4, null, true, ReferenceType.Message, "TSGU", "numAltResources", "HTTP_CHANNEL_PACKET", "0", "3", value);
+    ushort port;
+    ushort tsprotocol;
+    optional [|packetLength - 14 > 0|] HTTP_CHANNEL_PACKET_VARIABLE[numResources, numAltResources] channelPacketVariable;
+
+    override string ToString()
+    {
+        return "HTTP_CHANNEL_PACKET, " + this.HeaderToString();
+    }
+}
+
+// 2.2.10.3   HTTP_CHANNEL_PACKET_VARIABLE Structure
+type HTTP_CHANNEL_PACKET_VARIABLE [byte numResources, byte numAltResources]
+{
+    optional [|numResources != 0|] HTTP_UNICODE_STRING pResource with BinaryEncoding{Length = numResources};
+    optional [|numAltResources != 0|] HTTP_UNICODE_STRING pAltResources with BinaryEncoding{Length = numAltResources};
+}
+
+// 2.2.10.4   HTTP_CHANNEL_RESPONSE Structure
+message HTTP_CHANNEL_RESPONSE : HTTP_PACKET_HEADER
+{
+    invariant (packetType == packetTypeEnum.PKT_TYPE_CHANNEL_RESPONSE);
+    uint errorCode;
+    HTTP_CHANNEL_RESPONSE_FIELDS_PRESENT_FLAGS fieldsPresent;
+    ushort reserved;
+    optional [|packetLength - 16 > 0|] HTTP_CHANNEL_RESPONSE_OPTIONAL channelResponseOptional;
+
+    override string ToString()
+    {
+        return "HTTP_CHANNEL_RESPONSE, " + this.HeaderToString();
+    }
+}
+
+// 2.2.10.5   HTTP_CHANNEL_RESPONSE_OPTIONAL Structure
+type HTTP_CHANNEL_RESPONSE_OPTIONAL
+{
+    uint channelId;
+    ushort udpPort;
+    HTTP_byte_BLOB authnCookie;
+}
+
+// 2.2.10.6   HTTP_DATA_PACKET Structure
+message HTTP_DATA_PACKET : HTTP_PACKET_HEADER
+{
+    invariant (packetType == packetTypeEnum.PKT_TYPE_DATA);
+    ushort cbDataLen;
+    optional [|cbDataLen != 0|] array<byte> data with BinaryEncoding{Length = cbDataLen};
+
+    override string ToString()
+    {
+        return "HTTP_DATA_PACKET, " + this.HeaderToString();
+    }
+}with Encoding{EncodingKind = EncodingKind.Binary}, IDL{DoNotGenerate = true};
+
+// 2.2.10.7   HTTP_EXTENDED_AUTH_PACKET Structure
+message HTTP_EXTENDED_AUTH_PACKET : HTTP_PACKET_HEADER
+{
+    invariant (packetType == packetTypeEnum.PKT_TYPE_EXTENDED_AUTH_MSG);
+    
+    uint errorCode;
+    ushort cbBlobLen;
+    optional [|cbBlobLen != 0|] array<byte> authBlob with BinaryEncoding{Length = cbBlobLen};
+
+    override string ToString()
+    {
+        return "HTTP_EXTENDED_AUTH_PACKET, " + this.HeaderToString();
+    }
+}with Encoding{EncodingKind = EncodingKind.Binary}, IDL{DoNotGenerate = true};
+
+// 2.2.10.8   HTTP_KEEPALIVE_PACKET Structure
+message HTTP_KEEPALIVE_PACKET : HTTP_PACKET_HEADER
+{
+    invariant (packetType == packetTypeEnum.PKT_TYPE_KEEPALIVE);
+
+    override string ToString()
+    {
+        return "HTTP_KEEPALIVE_PACKET, " + this.HeaderToString();
+    }
+}
+
+// 2.2.10.9   HTTP_PACKET_HEADER Structure
+message HTTP_PACKET_HEADER
+{
+    packetTypeEnum packetType;
+    ushort headerReserved;
+    uint packetLength;
+
+    string HeaderToString()
+    {
+        string summary = "";
+        summary += "packetType: " +  packetType.ToString();
+        summary += ", packetLength: " +  packetLength.ToString();
+        return summary;
+    }
+}
+
+// 2.2.10.10   HTTP_HANDSHAKE_REQUEST_PACKET Structure
+message HTTP_HANDSHAKE_REQUEST_PACKET : HTTP_PACKET_HEADER
+{
+    invariant (packetType == packetTypeEnum.PKT_TYPE_HANDSHAKE_REQUEST);
+
+    byte verMajor;
+    byte verMinor;
+    ushort clientVersion;
+    HTTP_EXTENDED_AUTH ExtendedAuth;
+
+    override string ToString()
+    {
+        return "HTTP_HANDSHAKE_REQUEST_PACKET, " + this.HeaderToString()
+               + "verMajor: " + verMajor.ToString()
+               + "verMinor: " + verMinor.ToString()
+               + "clientVersion: " + clientVersion.ToString();;
+    }
+}
+
+// 2.2.10.11   HTTP_HANDSHAKE_RESPONSE_PACKET Structure
+message HTTP_HANDSHAKE_RESPONSE_PACKET : HTTP_PACKET_HEADER
+{
+    invariant (packetType == packetTypeEnum.PKT_TYPE_HANDSHAKE_RESPONSE);
+    
+    uint errorCode;
+    byte verMajor;
+    byte verMinor;
+    ushort servertVersion;
+    HTTP_EXTENDED_AUTH ExtendedAuth;
+
+    override string ToString()
+    {
+        return "HTTP_HANDSHAKE_REQUEST_PACKET, " + this.HeaderToString();
+    }
+}
+
+// 2.2.10.12   HTTP_REAUTH_MESSAGE Structure
+message HTTP_REAUTH_MESSAGE : HTTP_PACKET_HEADER
+{
+    invariant (packetType == packetTypeEnum.PKT_TYPE_REAUTH_MESSAGE);
+    ulong reauthTunnelContext;
+
+    override string ToString()
+    {
+        return "HTTP_REAUTH_MESSAGE, " + this.HeaderToString();
+    }
+}
+
+// 2.2.10.13   HTTP_SERVICE_MESSAGE Structure
+message HTTP_SERVICE_MESSAGE : HTTP_PACKET_HEADER
+{
+    invariant (packetType == packetTypeEnum.PKT_TYPE_SERVICE_MESSAGE);
+    ushort cbMessageLen;
+    optional [|cbMessageLen != 0|] array<byte> serviceMessage with BinaryEncoding{Length = cbMessageLen};
+
+    override string ToString()
+    {
+        return "HTTP_SERVICE_MESSAGE, " + this.HeaderToString();
+    }
+}with Encoding{EncodingKind = EncodingKind.Binary}, IDL{DoNotGenerate = true};
+
+// 2.2.10.14   HTTP_TUNNEL_AUTH_PACKET Structure
+message HTTP_TUNNEL_AUTH_PACKET : HTTP_PACKET_HEADER
+{
+    invariant (packetType == packetTypeEnum.PKT_TYPE_TUNNEL_AUTH);
+
+    HTTP_TUNNEL_AUTH_FIELDS_PRESENT_FLAGS fieldsPresent;
+    ushort cbClientName;
+    optional [|cbClientName != 0|] array<byte> clientName with BinaryEncoding{Length = cbClientName};
+    optional [|packetLength - cbClientName - 12 > 0|] HTTP_TUNNEL_AUTH_PACKET_OPTIONAL tunnelAuthPacketOptional;
+
+    override string ToString()
+    {
+        return "HTTP_TUNNEL_AUTH_PACKET, " + this.HeaderToString();
+    }
+}with Encoding{EncodingKind = EncodingKind.Binary}, IDL{DoNotGenerate = true};
+
+// 2.2.10.15   HTTP_TUNNEL_AUTH_PACKET_OPTIONAL Structure
+type HTTP_TUNNEL_AUTH_PACKET_OPTIONAL
+{
+    HTTP_UNICODE_STRING clientName;
+    HTTP_byte_BLOB statementOfHealth;
+}
+
+// 2.2.10.16   HTTP_TUNNEL_AUTH_RESPONSE Structure
+message HTTP_TUNNEL_AUTH_RESPONSE : HTTP_PACKET_HEADER
+{
+    invariant (packetType == packetTypeEnum.PKT_TYPE_TUNNEL_AUTH_RESPONSE);
+
+    uint errorCode;
+    HTTP_TUNNEL_AUTH_RESPONSE_FIELDS_PRESENT_FLAGS fieldsPresent;
+    ushort reserved;
+    optional [|packetLength - 16 > 0|] HTTP_TUNNEL_AUTH_RESPONSE_OPTIONAL tunnelAuthResponseOptional;
+
+    override string ToString()
+    {
+        return "HTTP_TUNNEL_AUTH_RESPONSE, " + this.HeaderToString();
+    }
+}
+
+// 2.2.10.17   HTTP_TUNNEL_AUTH_RESPONSE_OPTIONAL Structure
+type HTTP_TUNNEL_AUTH_RESPONSE_OPTIONAL
+{
+    HTTP_TUNNEL_REDIR_FLAGS redirFlags;
+    uint idleTimeout;
+    HTTP_byte_BLOB SoHResponse;
+}
+
+// 2.2.10.18   HTTP_TUNNEL_PACKET Structure
+message HTTP_TUNNEL_PACKET : HTTP_PACKET_HEADER
+{
+    invariant (packetType == packetTypeEnum.PKT_TYPE_TUNNEL_CREATE);
+
+    HTTP_CAPABILITY_TYPE capsFlags;
+    HTTP_TUNNEL_PACKET_FIELDS_PRESENT_FLAGS fieldsPresent;
+    ushort reserved;
+    optional [|packetLength - 16 > 0|] HTTP_TUNNEL_PACKET_OPTIONAL tunnelPacketOptional;
+
+    override string ToString()
+    {
+        return "HTTP_TUNNEL_PACKET, " + this.HeaderToString();
+    }
+}
+
+message HTTP_CLOSE_PACKET
+{
+    invariant (packetType == packetTypeEnum.PKT_TYPE_CLOSE_CHANNEL);
+    packetTypeEnum packetType;
+
+    override string ToString()
+    {
+        return "HTTP_CLOSE_PACKET, packetType: " + packetType.ToString();
+    }
+}
+
+message HTTP_CLOSE_PACKET_RESPONSE
+{
+    invariant (packetType == packetTypeEnum.PKT_TYPE_CLOSE_CHANNEL_RESPONSE);
+    packetTypeEnum packetType;
+
+    override string ToString()
+    {
+        return "HTTP_TUNNEL_RESPONSE, packetType: " + packetType.ToString();
+    }
+}
+
+// 2.2.10.19   HTTP_TUNNEL_PACKET_OPTIONAL Structure
+type HTTP_TUNNEL_PACKET_OPTIONAL
+{
+    ulong reauthTunnelContext;
+    HTTP_byte_BLOB PAACookie;
+}
+
+// 2.2.10.20   HTTP_TUNNEL_RESPONSE Structure
+message HTTP_TUNNEL_RESPONSE : HTTP_PACKET_HEADER
+{
+    invariant (packetType == packetTypeEnum.PKT_TYPE_TUNNEL_RESPONSE);
+
+    ushort serverVersion;
+    uint statusCode;
+    HTTP_TUNNEL_RESPONSE_FIELDS_PRESENT_FLAGS fieldsPresent;
+    ushort reserved;
+    optional [|packetLength - 16 > 0|] HTTP_TUNNEL_RESPONSE_OPTIONAL tunnelResponseOptional;
+
+    override string ToString()
+    {
+        return "HTTP_TUNNEL_RESPONSE, " + this.HeaderToString();
+    }
+}
+
+// 2.2.10.21   HTTP_TUNNEL_RESPONSE_OPTIONAL Structure
+type HTTP_TUNNEL_RESPONSE_OPTIONAL
+{
+    uint tunnelId;
+    HTTP_CAPABILITY_TYPE capsFlags;
+    binary nonce with BinaryEncoding{Length = 20}; 
+    HTTP_UNICODE_STRING serverCert;
+    HTTP_UNICODE_STRING consentMsg;
+}
+
+// 2.2.10.22   HTTP_UNICODE_STRING 
+type HTTP_UNICODE_STRING
+{
+    ushort cbLen;
+    optional [|cbLen != 0|] string str with BinaryEncoding{TextEncoding = TextEncoding.Unicode, Length = (cbLen / 2)}; 
+}
+
+// 2.2.5.3.1   HTTP_CHANNEL_RESPONSE_FIELDS_PRESENT_FLAGS Enumeration
+pattern HTTP_CHANNEL_RESPONSE_FIELDS_PRESENT_FLAGS = enum short
+{
+    HTTP_CHANNEL_RESPONSE_FIELD_CHANNELID = 0x01,
+    HTTP_CHANNEL_RESPONSE_FIELD_AUTHNCOOKIE = 0x02,
+    HTTP_CHANNEL_RESPONSE_FIELD_UDPPORT = 0x04,
+    ...
+};
+
+// 2.2.5.3.2   HTTP_EXTENDED_AUTH Enumeration
+pattern HTTP_EXTENDED_AUTH  = enum short
+{
+    HTTP_EXTENDED_AUTH_NONE = 0x00,
+    HTTP_EXTENDED_AUTH_SC = 0x01,
+    HTTP_EXTENDED_AUTH_PAA = 0x02,
+    ...
+};
+
+// 2.2.5.3.3   HTTP_PACKET_TYPE Enumeration
+pattern packetTypeEnum = enum ushort
+{
+    PKT_TYPE_HANDSHAKE_REQUEST = 0x01,
+    PKT_TYPE_HANDSHAKE_RESPONSE = 0x02,
+    PKT_TYPE_EXTENDED_AUTH_MSG = 0x03,
+    PKT_TYPE_TUNNEL_CREATE = 0x04,
+    PKT_TYPE_TUNNEL_RESPONSE = 0x05,
+    PKT_TYPE_TUNNEL_AUTH = 0x06,
+    PKT_TYPE_TUNNEL_AUTH_RESPONSE = 0x07,
+    PKT_TYPE_CHANNEL_CREATE = 0x08,
+    PKT_TYPE_CHANNEL_RESPONSE = 0x09,
+    PKT_TYPE_DATA = 0x10,
+    PKT_TYPE_SERVICE_MESSAGE = 0x11,
+    PKT_TYPE_REAUTH_MESSAGE = 0x12,
+    PKT_TYPE_KEEPALIVE = 0x13,
+    PKT_TYPE_CLOSE_CHANNEL = 0x14,
+    PKT_TYPE_CLOSE_CHANNEL_RESPONSE = 0x15,
+    ...
+};
+
+// 2.2.5.3.4   HTTP_TUNNEL_AUTH_FIELDS_PRESENT_FLAGS Enumeration
+pattern HTTP_TUNNEL_AUTH_FIELDS_PRESENT_FLAGS  = enum short
+{
+    HTTP_TUNNEL_AUTH_FIELD_SOH = 0x01,
+    ...
+};
+
+// 2.2.5.3.5   HTTP_TUNNEL_AUTH_RESPONSE_FIELDS_PRESENT_FLAGS Enumeration
+pattern HTTP_TUNNEL_AUTH_RESPONSE_FIELDS_PRESENT_FLAGS  = enum short
+{
+    HTTP_TUNNEL_AUTH_RESPONSE_FIELD_REDIR_FLAGS = 0x01,
+    HTTP_TUNNEL_AUTH_RESPONSE_FIELD_IDLE_TIMEOUT = 0x02,
+    HTTP_TUNNEL_AUTH_RESPONSE_FIELD_SOH_RESPONSE = 0x04,
+    ...
+};
+
+// 2.2.5.3.6   HTTP_TUNNEL_PACKET_FIELDS_PRESENT_FLAGS Enumeration
+pattern HTTP_TUNNEL_PACKET_FIELDS_PRESENT_FLAGS   = enum ushort
+{
+    HTTP_TUNNEL_PACKET_FIELD_PAA_COOKIE = 0x01,
+    HTTP_TUNNEL_PACKET_FIELD_REAUTH = 0x02,
+    ...
+};
+
+// 2.2.5.3.7   HTTP_TUNNEL_REDIR_FLAGS Enumeration
+pattern HTTP_TUNNEL_REDIR_FLAGS = enum uint
+{
+    HTTP_TUNNEL_REDIR_ENABLE_ALL = 0x80000000,
+    HTTP_TUNNEL_REDIR_DISABLE_ALL = 0x40000000,
+    HTTP_TUNNEL_REDIR_DISABLE_DRIVE = 0x01,
+    HTTP_TUNNEL_REDIR_DISABLE_PRINTER = 0x02,
+    HTTP_TUNNEL_REDIR_DISABLE_PORT = 0x04,
+    HTTP_TUNNEL_REDIR_DISABLE_CLIPBOARD = 0x08,
+    HTTP_TUNNEL_REDIR_DISABLE_PNP = 0x10,
+    ...
+};
+
+// 2.2.5.3.8   HTTP_TUNNEL_RESPONSE_FIELDS_PRESENT_FLAGS Enumeration
+pattern HTTP_TUNNEL_RESPONSE_FIELDS_PRESENT_FLAGS = enum ushort
+{
+    HTTP_TUNNEL_RESPONSE_FIELD_TUNNEL_ID = 0x01,
+    HTTP_TUNNEL_RESPONSE_FIELD_CAPS = 0x02,
+    HTTP_TUNNEL_RESPONSE_FIELD_SOH_REQ = 0x04,
+    HTTP_TUNNEL_RESPONSE_FIELD_CONSENT_MSG = 0x10,
+    ...
+};
+
+// 2.2.5.3.9   HTTP_CAPABILITY_TYPE Enumeration
+pattern HTTP_CAPABILITY_TYPE = enum uint
+{
+    HTTP_CAPABILITY_TYPE_QUAR_SOH = 0x01,
+    HTTP_CAPABILITY_IDLE_TIMEOUT = 0x02,
+    HTTP_CAPABILITY_MESSAGING_CONSENT_SIGN = 0x04,
+    HTTP_CAPABILITY_MESSAGING_SERVICE_MSG = 0x08,
+    HTTP_CAPABILITY_REAUTH = 0x10,
+    HTTP_CAPABILITY_UDP_TRANSPORT = 0x20,
+    ...
+};
